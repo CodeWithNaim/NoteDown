@@ -118,7 +118,7 @@ export function Sidebar({ onOpenCommandPalette, isDarkMode, toggleDarkMode }: Si
           {/* Header */}
           <div className="p-4 border-b border-border flex items-center justify-between">
             <div className="flex items-center gap-2">
-              <img src="/logo.png" alt="NoteDown" className="w-8 h-8 rounded-lg" />
+              <img src="/logo.png" alt="NoteDown" className="w-8 h-8 rounded-lg dark:invert" />
               <span className="font-semibold text-foreground">NoteDown</span>
             </div>
             <div className="flex items-center gap-1">

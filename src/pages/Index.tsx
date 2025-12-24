@@ -19,6 +19,7 @@ const Index = () => {
   const { sidebarCollapsed, focusMode } = useNotesStore();
 
   useEffect(() => {
+    // Handle theme class and storage
     if (isDarkMode) {
       document.documentElement.classList.add('dark');
       localStorage.setItem('theme', 'dark');
@@ -26,6 +27,36 @@ const Index = () => {
       document.documentElement.classList.remove('dark');
       localStorage.setItem('theme', 'light');
     }
+
+    // Handle dynamic favicon
+    const updateFavicon = () => {
+      const img = new Image();
+      img.src = '/logo.png';
+      img.onload = () => {
+        const canvas = document.createElement('canvas');
+        canvas.width = img.width;
+        canvas.height = img.height;
+        const ctx = canvas.getContext('2d');
+        if (ctx) {
+          if (isDarkMode) {
+            ctx.filter = 'invert(1)';
+          }
+          ctx.drawImage(img, 0, 0);
+
+          const link = document.querySelector("link[rel~='icon']") as HTMLLinkElement;
+          if (link) {
+            link.href = canvas.toDataURL();
+          } else {
+            const newLink = document.createElement('link');
+            newLink.rel = 'icon';
+            newLink.href = canvas.toDataURL();
+            document.head.appendChild(newLink);
+          }
+        }
+      };
+    };
+
+    updateFavicon();
   }, [isDarkMode]);
 
   useEffect(() => {
@@ -48,17 +79,16 @@ const Index = () => {
         <title>Notes - Modern Note-Taking</title>
         <meta name="description" content="A beautiful, modern note-taking app with hierarchical organization and infinite canvas." />
       </Helmet>
-      
+
       <div className="flex min-h-screen h-screen bg-background overflow-hidden">
         <Sidebar
           onOpenCommandPalette={() => setIsCommandPaletteOpen(true)}
           isDarkMode={isDarkMode}
           toggleDarkMode={toggleDarkMode}
         />
-        
-        <main className={`flex-1 relative overflow-hidden ${
-          focusMode ? 'ml-0' : sidebarCollapsed ? 'ml-0' : ''
-        }`}>
+
+        <main className={`flex-1 relative overflow-hidden ${focusMode ? 'ml-0' : sidebarCollapsed ? 'ml-0' : ''
+          }`}>
           <InfiniteCanvas />
         </main>
 
