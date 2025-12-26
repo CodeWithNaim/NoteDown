@@ -735,17 +735,12 @@ export function CanvasTable({ item, isSelected, scale = 1, onSelect, onUpdate, o
                               onApply={(c) => {
                                 if (colorScope === 'cell' && focusedCell) {
                                   const key = `${focusedCell.row}-${focusedCell.col}`;
-                                  const newStyles = { ...item.cellStyles, [key]: { ...item.cellStyles?.[key], textColor: c } };
-                                  const newItem = { ...item, cellStyles: newStyles };
-                                  onUpdate(newItem);
-                                  onHistorySave?.(item, newItem);
+                                  handleStyleUpdate({ cellStyles: { ...item.cellStyles, [key]: { ...item.cellStyles?.[key], textColor: c } } });
                                 } else {
-                                  const newItem = { ...item, textColor: c, cellStyles: {} };
-                                  onUpdate(newItem);
-                                  onHistorySave?.(item, newItem);
+                                  handleStyleUpdate({ textColor: c, cellStyles: {} });
                                 }
                               }}
-                              onClose={() => { }}
+                              onClose={() => setTextTab(null)}
                             />
                           )}
                         </div>
