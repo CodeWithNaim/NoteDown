@@ -35,6 +35,7 @@ export interface CanvasDrawing {
   y: number;
   width: number;
   height: number;
+  maskPaths?: { path: string; strokeWidth: number }[];
 }
 
 export interface CanvasStickyNote {
@@ -105,36 +106,36 @@ interface NotesState {
   focusMode: boolean;
   searchQuery: string;
   drawingMode: boolean;
-  
+
   // Actions
   createNotebook: (title: string) => void;
   updateNotebook: (id: string, updates: Partial<Notebook>) => void;
   deleteNotebook: (id: string) => void;
   toggleNotebookExpanded: (id: string) => void;
-  
+
   createSection: (notebookId: string, title: string) => void;
   updateSection: (notebookId: string, sectionId: string, updates: Partial<Section>) => void;
   deleteSection: (notebookId: string, sectionId: string) => void;
   toggleSectionExpanded: (notebookId: string, sectionId: string) => void;
-  
+
   createPage: (notebookId: string, sectionId: string, title: string) => void;
   updatePage: (notebookId: string, sectionId: string, pageId: string, updates: Partial<Page>) => void;
   deletePage: (notebookId: string, sectionId: string, pageId: string) => void;
   movePage: (pageId: string, fromNotebookId: string, fromSectionId: string, toNotebookId: string, toSectionId: string) => void;
-  
+
   // Canvas item actions
   addCanvasItem: (notebookId: string, sectionId: string, pageId: string, item: CanvasItem) => void;
   updateCanvasItem: (notebookId: string, sectionId: string, pageId: string, itemId: string, updates: Partial<CanvasItem>) => void;
   deleteCanvasItem: (notebookId: string, sectionId: string, pageId: string, itemId: string) => void;
   addTagToItem: (notebookId: string, sectionId: string, pageId: string, itemId: string, tag: string) => void;
   removeTagFromItem: (notebookId: string, sectionId: string, pageId: string, itemId: string, tag: string) => void;
-  
+
   setActivePage: (pageId: string | null) => void;
   toggleSidebar: () => void;
   toggleFocusMode: () => void;
   toggleDrawingMode: () => void;
   setSearchQuery: (query: string) => void;
-  
+
   getActivePage: () => { notebook: Notebook; section: Section; page: Page } | null;
   searchPages: (query: string) => { notebook: Notebook; section: Section; page: Page }[];
   searchByTag: (tag: string) => { notebook: Notebook; section: Section; page: Page; item?: CanvasTextBox }[];
@@ -257,11 +258,11 @@ export const useNotesStore = create<NotesState>()(
           notebooks: state.notebooks.map((nb) =>
             nb.id === notebookId
               ? {
-                  ...nb,
-                  sections: nb.sections.map((s) =>
-                    s.id === sectionId ? { ...s, ...updates } : s
-                  ),
-                }
+                ...nb,
+                sections: nb.sections.map((s) =>
+                  s.id === sectionId ? { ...s, ...updates } : s
+                ),
+              }
               : nb
           ),
         }));
@@ -288,11 +289,11 @@ export const useNotesStore = create<NotesState>()(
           notebooks: state.notebooks.map((nb) =>
             nb.id === notebookId
               ? {
-                  ...nb,
-                  sections: nb.sections.map((s) =>
-                    s.id === sectionId ? { ...s, isExpanded: !s.isExpanded } : s
-                  ),
-                }
+                ...nb,
+                sections: nb.sections.map((s) =>
+                  s.id === sectionId ? { ...s, isExpanded: !s.isExpanded } : s
+                ),
+              }
               : nb
           ),
         }));
@@ -312,11 +313,11 @@ export const useNotesStore = create<NotesState>()(
           notebooks: state.notebooks.map((nb) =>
             nb.id === notebookId
               ? {
-                  ...nb,
-                  sections: nb.sections.map((s) =>
-                    s.id === sectionId ? { ...s, pages: [...s.pages, newPage] } : s
-                  ),
-                }
+                ...nb,
+                sections: nb.sections.map((s) =>
+                  s.id === sectionId ? { ...s, pages: [...s.pages, newPage] } : s
+                ),
+              }
               : nb
           ),
           activePageId: newPage.id,
@@ -328,20 +329,20 @@ export const useNotesStore = create<NotesState>()(
           notebooks: state.notebooks.map((nb) =>
             nb.id === notebookId
               ? {
-                  ...nb,
-                  sections: nb.sections.map((s) =>
-                    s.id === sectionId
-                      ? {
-                          ...s,
-                          pages: s.pages.map((p) =>
-                            p.id === pageId
-                              ? { ...p, ...updates, updatedAt: new Date() }
-                              : p
-                          ),
-                        }
-                      : s
-                  ),
-                }
+                ...nb,
+                sections: nb.sections.map((s) =>
+                  s.id === sectionId
+                    ? {
+                      ...s,
+                      pages: s.pages.map((p) =>
+                        p.id === pageId
+                          ? { ...p, ...updates, updatedAt: new Date() }
+                          : p
+                      ),
+                    }
+                    : s
+                ),
+              }
               : nb
           ),
         }));
@@ -352,13 +353,13 @@ export const useNotesStore = create<NotesState>()(
           notebooks: state.notebooks.map((nb) =>
             nb.id === notebookId
               ? {
-                  ...nb,
-                  sections: nb.sections.map((s) =>
-                    s.id === sectionId
-                      ? { ...s, pages: s.pages.filter((p) => p.id !== pageId) }
-                      : s
-                  ),
-                }
+                ...nb,
+                sections: nb.sections.map((s) =>
+                  s.id === sectionId
+                    ? { ...s, pages: s.pages.filter((p) => p.id !== pageId) }
+                    : s
+                ),
+              }
               : nb
           ),
           activePageId: state.activePageId === pageId ? null : state.activePageId,
@@ -368,7 +369,7 @@ export const useNotesStore = create<NotesState>()(
       movePage: (pageId, fromNotebookId, fromSectionId, toNotebookId, toSectionId) => {
         const { notebooks } = get();
         let pageToMove: Page | null = null;
-        
+
         // Find the page
         for (const nb of notebooks) {
           if (nb.id === fromNotebookId) {
@@ -380,7 +381,7 @@ export const useNotesStore = create<NotesState>()(
             }
           }
         }
-        
+
         if (!pageToMove) return;
 
         set((state) => ({
@@ -417,20 +418,20 @@ export const useNotesStore = create<NotesState>()(
           notebooks: state.notebooks.map((nb) =>
             nb.id === notebookId
               ? {
-                  ...nb,
-                  sections: nb.sections.map((s) =>
-                    s.id === sectionId
-                      ? {
-                          ...s,
-                          pages: s.pages.map((p) =>
-                            p.id === pageId
-                              ? { ...p, canvasItems: [...p.canvasItems, item], updatedAt: new Date() }
-                              : p
-                          ),
-                        }
-                      : s
-                  ),
-                }
+                ...nb,
+                sections: nb.sections.map((s) =>
+                  s.id === sectionId
+                    ? {
+                      ...s,
+                      pages: s.pages.map((p) =>
+                        p.id === pageId
+                          ? { ...p, canvasItems: [...p.canvasItems, item], updatedAt: new Date() }
+                          : p
+                      ),
+                    }
+                    : s
+                ),
+              }
               : nb
           ),
         }));
@@ -441,26 +442,26 @@ export const useNotesStore = create<NotesState>()(
           notebooks: state.notebooks.map((nb) =>
             nb.id === notebookId
               ? {
-                  ...nb,
-                  sections: nb.sections.map((s) =>
-                    s.id === sectionId
-                      ? {
-                          ...s,
-                          pages: s.pages.map((p) =>
-                            p.id === pageId
-                              ? {
-                                  ...p,
-                                  canvasItems: p.canvasItems.map((item): CanvasItem =>
-                                    item.id === itemId ? ({ ...item, ...updates } as CanvasItem) : item
-                                  ),
-                                  updatedAt: new Date(),
-                                }
-                              : p
-                          ),
-                        }
-                      : s
-                  ),
-                }
+                ...nb,
+                sections: nb.sections.map((s) =>
+                  s.id === sectionId
+                    ? {
+                      ...s,
+                      pages: s.pages.map((p) =>
+                        p.id === pageId
+                          ? {
+                            ...p,
+                            canvasItems: p.canvasItems.map((item): CanvasItem =>
+                              item.id === itemId ? ({ ...item, ...updates } as CanvasItem) : item
+                            ),
+                            updatedAt: new Date(),
+                          }
+                          : p
+                      ),
+                    }
+                    : s
+                ),
+              }
               : nb
           ),
         }));
@@ -471,24 +472,24 @@ export const useNotesStore = create<NotesState>()(
           notebooks: state.notebooks.map((nb) =>
             nb.id === notebookId
               ? {
-                  ...nb,
-                  sections: nb.sections.map((s) =>
-                    s.id === sectionId
-                      ? {
-                          ...s,
-                          pages: s.pages.map((p) =>
-                            p.id === pageId
-                              ? {
-                                  ...p,
-                                  canvasItems: p.canvasItems.filter((item) => item.id !== itemId),
-                                  updatedAt: new Date(),
-                                }
-                              : p
-                          ),
-                        }
-                      : s
-                  ),
-                }
+                ...nb,
+                sections: nb.sections.map((s) =>
+                  s.id === sectionId
+                    ? {
+                      ...s,
+                      pages: s.pages.map((p) =>
+                        p.id === pageId
+                          ? {
+                            ...p,
+                            canvasItems: p.canvasItems.filter((item) => item.id !== itemId),
+                            updatedAt: new Date(),
+                          }
+                          : p
+                      ),
+                    }
+                    : s
+                ),
+              }
               : nb
           ),
         }));
@@ -499,27 +500,27 @@ export const useNotesStore = create<NotesState>()(
           notebooks: state.notebooks.map((nb) =>
             nb.id === notebookId
               ? {
-                  ...nb,
-                  sections: nb.sections.map((s) =>
-                    s.id === sectionId
-                      ? {
-                          ...s,
-                          pages: s.pages.map((p) =>
-                            p.id === pageId
-                              ? {
-                                  ...p,
-                                  canvasItems: p.canvasItems.map((item): CanvasItem =>
-                                    item.id === itemId && item.type === 'text'
-                                      ? { ...item, tags: [...(item as CanvasTextBox).tags, tag] } as CanvasTextBox
-                                      : item
-                                  ),
-                                }
-                              : p
-                          ),
-                        }
-                      : s
-                  ),
-                }
+                ...nb,
+                sections: nb.sections.map((s) =>
+                  s.id === sectionId
+                    ? {
+                      ...s,
+                      pages: s.pages.map((p) =>
+                        p.id === pageId
+                          ? {
+                            ...p,
+                            canvasItems: p.canvasItems.map((item): CanvasItem =>
+                              item.id === itemId && item.type === 'text'
+                                ? { ...item, tags: [...(item as CanvasTextBox).tags, tag] } as CanvasTextBox
+                                : item
+                            ),
+                          }
+                          : p
+                      ),
+                    }
+                    : s
+                ),
+              }
               : nb
           ),
         }));
@@ -530,27 +531,27 @@ export const useNotesStore = create<NotesState>()(
           notebooks: state.notebooks.map((nb) =>
             nb.id === notebookId
               ? {
-                  ...nb,
-                  sections: nb.sections.map((s) =>
-                    s.id === sectionId
-                      ? {
-                          ...s,
-                          pages: s.pages.map((p) =>
-                            p.id === pageId
-                              ? {
-                                  ...p,
-                                  canvasItems: p.canvasItems.map((item): CanvasItem =>
-                                    item.id === itemId && item.type === 'text'
-                                      ? { ...item, tags: (item as CanvasTextBox).tags.filter((t) => t !== tag) } as CanvasTextBox
-                                      : item
-                                  ),
-                                }
-                              : p
-                          ),
-                        }
-                      : s
-                  ),
-                }
+                ...nb,
+                sections: nb.sections.map((s) =>
+                  s.id === sectionId
+                    ? {
+                      ...s,
+                      pages: s.pages.map((p) =>
+                        p.id === pageId
+                          ? {
+                            ...p,
+                            canvasItems: p.canvasItems.map((item): CanvasItem =>
+                              item.id === itemId && item.type === 'text'
+                                ? { ...item, tags: (item as CanvasTextBox).tags.filter((t) => t !== tag) } as CanvasTextBox
+                                : item
+                            ),
+                          }
+                          : p
+                      ),
+                    }
+                    : s
+                ),
+              }
               : nb
           ),
         }));
@@ -590,7 +591,7 @@ export const useNotesStore = create<NotesState>()(
               const hasMatchInContent = page.canvasItems.some((item) => {
                 if (item.type === 'text') {
                   return item.content.toLowerCase().includes(lowerQuery) ||
-                         (item as CanvasTextBox).tags.some((t) => t.toLowerCase().includes(lowerQuery));
+                    (item as CanvasTextBox).tags.some((t) => t.toLowerCase().includes(lowerQuery));
                 }
                 if (item.type === 'file' || item.type === 'audio' || item.type === 'video') {
                   return item.fileName.toLowerCase().includes(lowerQuery);

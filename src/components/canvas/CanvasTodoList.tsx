@@ -9,6 +9,7 @@ import { cn } from '@/lib/utils';
 interface CanvasTodoListProps {
   item: TodoListType;
   isSelected: boolean;
+  scale?: number;
   onSelect: () => void;
   onUpdate: (updates: Partial<TodoListType>) => void;
   onDelete: () => void;
@@ -17,6 +18,7 @@ interface CanvasTodoListProps {
 export function CanvasTodoList({
   item,
   isSelected,
+  scale = 1,
   onSelect,
   onUpdate,
   onDelete,
@@ -24,22 +26,39 @@ export function CanvasTodoList({
   const [isDragging, setIsDragging] = useState(false);
   const [isResizing, setIsResizing] = useState(false);
   const [newItemText, setNewItemText] = useState('');
-  const dragStartPos = useRef({ x: 0, y: 0 });
-  const resizeStartSize = useRef({ width: 0, height: 0 });
+  const dragStartRef = useRef({
+    mouseX: 0,
+    mouseY: 0,
+    itemX: 0,
+    itemY: 0,
+    itemWidth: 0,
+    itemHeight: 0
+  });
 
   const handleDragStart = (e: React.MouseEvent) => {
     if ((e.target as HTMLElement).closest('.resize-handle')) return;
-    if ((e.target as HTMLElement).tagName === 'INPUT') return;
+    if ((e.target as HTMLElement).tagName === 'INPUT' || (e.target as HTMLElement).tagName === 'TEXTAREA') return;
     e.preventDefault();
     setIsDragging(true);
-    dragStartPos.current = { x: e.clientX - item.x, y: e.clientY - item.y };
+    dragStartRef.current = {
+      mouseX: e.clientX,
+      mouseY: e.clientY,
+      itemX: item.x,
+      itemY: item.y,
+      itemWidth: 0,
+      itemHeight: 0
+    };
   };
 
   const handleDrag = (e: MouseEvent) => {
     if (!isDragging) return;
+
+    const deltaX = (e.clientX - dragStartRef.current.mouseX) / scale;
+    const deltaY = (e.clientY - dragStartRef.current.mouseY) / scale;
+
     onUpdate({
-      x: Math.max(0, e.clientX - dragStartPos.current.x),
-      y: Math.max(0, e.clientY - dragStartPos.current.y),
+      x: dragStartRef.current.itemX + deltaX,
+      y: dragStartRef.current.itemY + deltaY,
     });
   };
 
@@ -49,17 +68,25 @@ export function CanvasTodoList({
     e.preventDefault();
     e.stopPropagation();
     setIsResizing(true);
-    resizeStartSize.current = { width: item.width, height: item.height };
-    dragStartPos.current = { x: e.clientX, y: e.clientY };
+    dragStartRef.current = {
+      mouseX: e.clientX,
+      mouseY: e.clientY,
+      itemX: 0,
+      itemY: 0,
+      itemWidth: item.width,
+      itemHeight: item.height
+    };
   };
 
   const handleResize = (e: MouseEvent) => {
     if (!isResizing) return;
-    const deltaX = e.clientX - dragStartPos.current.x;
-    const deltaY = e.clientY - dragStartPos.current.y;
+
+    const deltaX = (e.clientX - dragStartRef.current.mouseX) / scale;
+    const deltaY = (e.clientY - dragStartRef.current.mouseY) / scale;
+
     onUpdate({
-      width: Math.max(200, resizeStartSize.current.width + deltaX),
-      height: Math.max(150, resizeStartSize.current.height + deltaY),
+      width: Math.max(200, dragStartRef.current.itemWidth + deltaX),
+      height: Math.max(150, dragStartRef.current.itemHeight + deltaY),
     });
   };
 
@@ -119,7 +146,7 @@ export function CanvasTodoList({
   const completedCount = item.items.filter((i) => i.completed).length;
 
   return (
-    <motion.div
+    <div
       className={cn(
         'absolute bg-card border rounded-lg shadow-md overflow-hidden transition-shadow',
         isSelected ? 'ring-2 ring-primary shadow-lg' : 'hover:shadow-lg',
@@ -132,9 +159,6 @@ export function CanvasTodoList({
         minHeight: item.height,
       }}
       onClick={onSelect}
-      initial={{ scale: 0.9, opacity: 0 }}
-      animate={{ scale: 1, opacity: 1 }}
-      transition={{ duration: 0.15 }}
     >
       {/* Header */}
       <div
@@ -143,12 +167,12 @@ export function CanvasTodoList({
       >
         <div className="flex items-center gap-2">
           <GripVertical className="h-4 w-4 text-muted-foreground" />
-          <input
-            type="text"
-            value={item.title}
+          <textarea
+            defaultValue={item.title}
             onChange={(e) => onUpdate({ title: e.target.value })}
-            className="bg-transparent text-sm font-medium outline-none"
+            className="bg-transparent text-sm font-medium outline-none resize-none overflow-hidden h-6 w-full py-0.5"
             placeholder="To-Do List"
+            rows={1}
           />
         </div>
         <div className="flex items-center gap-2">
@@ -194,14 +218,14 @@ export function CanvasTodoList({
             >
               {todo.completed && <Check className="h-3 w-3" />}
             </button>
-            <input
-              type="text"
-              value={todo.text}
+            <textarea
+              defaultValue={todo.text}
               onChange={(e) => updateItemText(todo.id, e.target.value)}
               className={cn(
-                'flex-1 bg-transparent text-sm outline-none',
+                'flex-1 bg-transparent text-sm outline-none resize-none overflow-hidden min-h-[24px] py-0.5',
                 todo.completed && 'line-through text-muted-foreground'
               )}
+              rows={1}
             />
             <Button
               variant="ghost"
@@ -238,6 +262,6 @@ export function CanvasTodoList({
           <path fill="currentColor" d="M22 22H20V20H22V22ZM22 18H20V16H22V18ZM18 22H16V20H18V22ZM22 14H20V12H22V14ZM18 18H16V16H18V18ZM14 22H12V20H14V22Z" />
         </svg>
       </div>
-    </motion.div>
+    </div>
   );
 }

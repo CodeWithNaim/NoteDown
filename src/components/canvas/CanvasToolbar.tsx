@@ -15,19 +15,25 @@ import {
   Redo2,
   Eraser,
   Palette,
+  Trash2,
+  CircleSlash,
+  Slice,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Slider } from '@/components/ui/slider';
 import { cn } from '@/lib/utils';
+import { ColorPanel } from './ColorPanel';
 
-export type ToolType = 'select' | 'draw' | 'text' | 'image' | 'table' | 'todo' | 'sticky';
+export type ToolType = 'select' | 'draw' | 'text' | 'image' | 'table' | 'todo' | 'sticky' | 'eraser';
 
 const COLORS = [
-  '#000000', '#374151', '#ef4444', '#f97316', '#eab308', 
+  '#000000', '#374151', '#ef4444', '#f97316', '#eab308',
   '#22c55e', '#3b82f6', '#8b5cf6', '#ec4899', '#ffffff'
 ];
+
+export type EraserModeType = 'object' | 'pixel';
 
 interface CanvasToolbarProps {
   activeTool: ToolType;
@@ -36,9 +42,13 @@ interface CanvasToolbarProps {
   isRecording: boolean;
   canUndo: boolean;
   canRedo: boolean;
+  eraserMode: EraserModeType;
+  eraserSize: number;
   onToolChange: (tool: ToolType) => void;
   onColorChange: (color: string) => void;
   onStrokeWidthChange: (width: number) => void;
+  onEraserModeChange: (mode: EraserModeType) => void;
+  onEraserSizeChange: (size: number) => void;
   onUndo: () => void;
   onRedo: () => void;
   onClearDrawing: () => void;
@@ -54,9 +64,13 @@ export function CanvasToolbar({
   isRecording,
   canUndo,
   canRedo,
+  eraserMode,
+  eraserSize,
   onToolChange,
   onColorChange,
   onStrokeWidthChange,
+  onEraserModeChange,
+  onEraserSizeChange,
   onUndo,
   onRedo,
   onClearDrawing,
@@ -66,6 +80,7 @@ export function CanvasToolbar({
 }: CanvasToolbarProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
+  const [isColorPickerOpen, setIsColorPickerOpen] = useState(false);
 
   return (
     <TooltipProvider>
@@ -107,34 +122,86 @@ export function CanvasToolbar({
           <TooltipContent>Draw (D)</TooltipContent>
         </Tooltip>
 
+        {/* Eraser Tool with Dropdown */}
+        <Popover>
+          <PopoverTrigger asChild>
+            <Button
+              variant={activeTool === 'eraser' ? 'secondary' : 'ghost'}
+              size="icon"
+              className="h-9 w-9"
+              onClick={() => onToolChange('eraser')}
+            >
+              <Eraser className="h-4 w-4" />
+            </Button>
+          </PopoverTrigger>
+          <PopoverContent className="w-auto p-3" align="center">
+            <div className="flex flex-col gap-2">
+              <button
+                className={cn(
+                  'flex items-center gap-2 px-3 py-2 rounded-md text-sm font-medium transition-colors',
+                  eraserMode === 'object' ? 'bg-primary text-primary-foreground' : 'hover:bg-muted'
+                )}
+                onClick={() => {
+                  onEraserModeChange('object');
+                  onToolChange('eraser');
+                }}
+              >
+                <CircleSlash className="h-4 w-4" />
+                Stroke Eraser
+              </button>
+              <button
+                className={cn(
+                  'flex items-center gap-2 px-3 py-2 rounded-md text-sm font-medium transition-colors',
+                  eraserMode === 'pixel' ? 'bg-primary text-primary-foreground' : 'hover:bg-muted'
+                )}
+                onClick={() => {
+                  onEraserModeChange('pixel');
+                  onToolChange('eraser');
+                }}
+              >
+                <Slice className="h-4 w-4" />
+                Pixel Eraser
+              </button>
+              <div className="border-t pt-2 mt-1">
+                <label className="text-xs text-muted-foreground">Eraser Size: {eraserSize}px</label>
+                <Slider
+                  value={[eraserSize]}
+                  min={5}
+                  max={50}
+                  step={1}
+                  onValueChange={([v]) => onEraserSizeChange(v)}
+                  className="mt-1"
+                />
+              </div>
+            </div>
+          </PopoverContent>
+        </Popover>
+
         {/* Color Picker */}
         {activeTool === 'draw' && (
           <>
-            <Popover>
+            <Popover open={isColorPickerOpen} onOpenChange={setIsColorPickerOpen}>
               <PopoverTrigger asChild>
                 <Button variant="ghost" size="icon" className="h-9 w-9">
-                  <div 
+                  <div
                     className="w-5 h-5 rounded-full border-2 border-border"
                     style={{ backgroundColor: drawingColor }}
                   />
                 </Button>
               </PopoverTrigger>
-              <PopoverContent className="w-auto p-3" align="center">
+              <PopoverContent
+                className="w-auto p-3"
+                align="center"
+                onMouseDown={(e) => e.stopPropagation()}
+                onPointerDown={(e) => e.stopPropagation()}
+              >
                 <div className="space-y-3">
-                  <div className="flex flex-wrap gap-2 max-w-[200px]">
-                    {COLORS.map((c) => (
-                      <button
-                        key={c}
-                        className={cn(
-                          'w-7 h-7 rounded-full border-2 transition-transform hover:scale-110',
-                          drawingColor === c ? 'border-primary ring-2 ring-primary/20' : 'border-border'
-                        )}
-                        style={{ backgroundColor: c }}
-                        onClick={() => onColorChange(c)}
-                      />
-                    ))}
-                  </div>
-                  <div className="space-y-2">
+                  <ColorPanel
+                    color={drawingColor}
+                    onChange={onColorChange}
+                    onClose={() => setIsColorPickerOpen(false)}
+                  />
+                  <div className="space-y-2 border-t pt-2">
                     <label className="text-xs text-muted-foreground">Stroke Width: {strokeWidth}px</label>
                     <Slider
                       value={[strokeWidth]}
@@ -177,20 +244,6 @@ export function CanvasToolbar({
                 </Button>
               </TooltipTrigger>
               <TooltipContent>Redo (Ctrl+Y)</TooltipContent>
-            </Tooltip>
-
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="h-9 w-9"
-                  onClick={onClearDrawing}
-                >
-                  <Eraser className="h-4 w-4" />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>Clear Drawing</TooltipContent>
             </Tooltip>
           </>
         )}
@@ -239,7 +292,7 @@ export function CanvasToolbar({
               <Table className="h-4 w-4" />
             </Button>
           </TooltipTrigger>
-          <TooltipContent>Insert Table</TooltipContent>
+          <TooltipContent>Insert Table (B)</TooltipContent>
         </Tooltip>
 
         {/* Todo List */}
@@ -254,7 +307,7 @@ export function CanvasToolbar({
               <CheckSquare className="h-4 w-4" />
             </Button>
           </TooltipTrigger>
-          <TooltipContent>To-Do List</TooltipContent>
+          <TooltipContent>To-Do List (L)</TooltipContent>
         </Tooltip>
 
         <div className="w-px h-6 bg-border mx-0.5" />

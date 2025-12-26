@@ -8,6 +8,7 @@ import { cn } from '@/lib/utils';
 interface CanvasTableProps {
   item: TableType;
   isSelected: boolean;
+  scale?: number;
   onSelect: () => void;
   onUpdate: (updates: Partial<TableType>) => void;
   onDelete: () => void;
@@ -16,28 +17,46 @@ interface CanvasTableProps {
 export function CanvasTable({
   item,
   isSelected,
+  scale = 1,
   onSelect,
   onUpdate,
   onDelete,
 }: CanvasTableProps) {
   const [isDragging, setIsDragging] = useState(false);
   const [isResizing, setIsResizing] = useState(false);
-  const dragStartPos = useRef({ x: 0, y: 0 });
-  const resizeStartSize = useRef({ width: 0, height: 0 });
+  const dragStartRef = useRef({
+    mouseX: 0,
+    mouseY: 0,
+    itemX: 0,
+    itemY: 0,
+    itemWidth: 0,
+    itemHeight: 0
+  });
 
   const handleDragStart = (e: React.MouseEvent) => {
     if ((e.target as HTMLElement).closest('.resize-handle')) return;
-    if ((e.target as HTMLElement).tagName === 'INPUT') return;
+    if ((e.target as HTMLElement).tagName === 'INPUT' || (e.target as HTMLElement).tagName === 'TEXTAREA') return;
     e.preventDefault();
     setIsDragging(true);
-    dragStartPos.current = { x: e.clientX - item.x, y: e.clientY - item.y };
+    dragStartRef.current = {
+      mouseX: e.clientX,
+      mouseY: e.clientY,
+      itemX: item.x,
+      itemY: item.y,
+      itemWidth: 0,
+      itemHeight: 0
+    };
   };
 
   const handleDrag = (e: MouseEvent) => {
     if (!isDragging) return;
+
+    const deltaX = (e.clientX - dragStartRef.current.mouseX) / scale;
+    const deltaY = (e.clientY - dragStartRef.current.mouseY) / scale;
+
     onUpdate({
-      x: Math.max(0, e.clientX - dragStartPos.current.x),
-      y: Math.max(0, e.clientY - dragStartPos.current.y),
+      x: dragStartRef.current.itemX + deltaX,
+      y: dragStartRef.current.itemY + deltaY,
     });
   };
 
@@ -47,17 +66,25 @@ export function CanvasTable({
     e.preventDefault();
     e.stopPropagation();
     setIsResizing(true);
-    resizeStartSize.current = { width: item.width, height: item.height };
-    dragStartPos.current = { x: e.clientX, y: e.clientY };
+    dragStartRef.current = {
+      mouseX: e.clientX,
+      mouseY: e.clientY,
+      itemX: 0,
+      itemY: 0,
+      itemWidth: item.width,
+      itemHeight: item.height
+    };
   };
 
   const handleResize = (e: MouseEvent) => {
     if (!isResizing) return;
-    const deltaX = e.clientX - dragStartPos.current.x;
-    const deltaY = e.clientY - dragStartPos.current.y;
+
+    const deltaX = (e.clientX - dragStartRef.current.mouseX) / scale;
+    const deltaY = (e.clientY - dragStartRef.current.mouseY) / scale;
+
     onUpdate({
-      width: Math.max(200, resizeStartSize.current.width + deltaX),
-      height: Math.max(100, resizeStartSize.current.height + deltaY),
+      width: Math.max(200, dragStartRef.current.itemWidth + deltaX),
+      height: Math.max(100, dragStartRef.current.itemHeight + deltaY),
     });
   };
 
@@ -115,7 +142,7 @@ export function CanvasTable({
   };
 
   return (
-    <motion.div
+    <div
       className={cn(
         'absolute bg-card border rounded-lg shadow-md overflow-hidden transition-shadow',
         isSelected ? 'ring-2 ring-primary shadow-lg' : 'hover:shadow-lg',
@@ -128,9 +155,6 @@ export function CanvasTable({
         minHeight: item.height,
       }}
       onClick={onSelect}
-      initial={{ scale: 0.9, opacity: 0 }}
-      animate={{ scale: 1, opacity: 1 }}
-      transition={{ duration: 0.15 }}
     >
       {/* Header */}
       <div
@@ -169,16 +193,17 @@ export function CanvasTable({
             {item.cells.map((row, rowIndex) => (
               <tr key={rowIndex}>
                 {row.map((cell, colIndex) => (
-                  <td key={colIndex} className="border border-border p-0">
-                    <input
-                      type="text"
+                  <td key={colIndex} className="border border-border p-0 bg-background">
+                    <textarea
                       value={cell}
                       onChange={(e) => updateCell(rowIndex, colIndex, e.target.value)}
                       className={cn(
-                        'w-full px-2 py-1.5 text-sm bg-transparent outline-none focus:bg-primary/5',
+                        'w-full h-full px-2 py-1.5 text-sm bg-transparent outline-none resize-none overflow-hidden block',
                         rowIndex === 0 && 'font-semibold bg-muted/30'
                       )}
                       placeholder={rowIndex === 0 ? 'Header' : ''}
+                      rows={1}
+                      style={{ minHeight: '32px' }}
                     />
                   </td>
                 ))}
@@ -207,6 +232,6 @@ export function CanvasTable({
           <path fill="currentColor" d="M22 22H20V20H22V22ZM22 18H20V16H22V18ZM18 22H16V20H18V22ZM22 14H20V12H22V14ZM18 18H16V16H18V18ZM14 22H12V20H14V22Z" />
         </svg>
       </div>
-    </motion.div>
+    </div>
   );
 }

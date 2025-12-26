@@ -8,6 +8,7 @@ import { cn } from '@/lib/utils';
 interface CanvasImageProps {
   item: MediaItemType;
   isSelected: boolean;
+  scale?: number;
   onSelect: () => void;
   onUpdate: (updates: Partial<MediaItemType>) => void;
   onDelete: () => void;
@@ -16,27 +17,45 @@ interface CanvasImageProps {
 export function CanvasImage({
   item,
   isSelected,
+  scale = 1,
   onSelect,
   onUpdate,
   onDelete,
 }: CanvasImageProps) {
   const [isDragging, setIsDragging] = useState(false);
   const [isResizing, setIsResizing] = useState(false);
-  const dragStartPos = useRef({ x: 0, y: 0 });
-  const resizeStartSize = useRef({ width: 0, height: 0 });
+  const dragStartRef = useRef({
+    mouseX: 0,
+    mouseY: 0,
+    itemX: 0,
+    itemY: 0,
+    itemWidth: 0,
+    itemHeight: 0
+  });
 
   const handleDragStart = (e: React.MouseEvent) => {
     if ((e.target as HTMLElement).closest('.resize-handle')) return;
     e.preventDefault();
     setIsDragging(true);
-    dragStartPos.current = { x: e.clientX - item.x, y: e.clientY - item.y };
+    dragStartRef.current = {
+      mouseX: e.clientX,
+      mouseY: e.clientY,
+      itemX: item.x,
+      itemY: item.y,
+      itemWidth: 0,
+      itemHeight: 0
+    };
   };
 
   const handleDrag = (e: MouseEvent) => {
     if (!isDragging) return;
+
+    const deltaX = (e.clientX - dragStartRef.current.mouseX) / scale;
+    const deltaY = (e.clientY - dragStartRef.current.mouseY) / scale;
+
     onUpdate({
-      x: Math.max(0, e.clientX - dragStartPos.current.x),
-      y: Math.max(0, e.clientY - dragStartPos.current.y),
+      x: dragStartRef.current.itemX + deltaX,
+      y: dragStartRef.current.itemY + deltaY,
     });
   };
 
@@ -46,16 +65,23 @@ export function CanvasImage({
     e.preventDefault();
     e.stopPropagation();
     setIsResizing(true);
-    resizeStartSize.current = { width: item.width, height: item.height };
-    dragStartPos.current = { x: e.clientX, y: e.clientY };
+    dragStartRef.current = {
+      mouseX: e.clientX,
+      mouseY: e.clientY,
+      itemX: 0,
+      itemY: 0,
+      itemWidth: item.width,
+      itemHeight: item.height
+    };
   };
 
   const handleResize = (e: MouseEvent) => {
     if (!isResizing) return;
-    const deltaX = e.clientX - dragStartPos.current.x;
+
+    const deltaX = (e.clientX - dragStartRef.current.mouseX) / scale;
     // Maintain aspect ratio
-    const aspectRatio = resizeStartSize.current.width / resizeStartSize.current.height;
-    const newWidth = Math.max(100, resizeStartSize.current.width + deltaX);
+    const aspectRatio = dragStartRef.current.itemWidth / dragStartRef.current.itemHeight;
+    const newWidth = Math.max(100, dragStartRef.current.itemWidth + deltaX);
     const newHeight = newWidth / aspectRatio;
     onUpdate({
       width: newWidth,

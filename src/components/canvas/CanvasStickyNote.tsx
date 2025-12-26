@@ -17,60 +17,111 @@ const STICKY_COLORS = {
 interface CanvasStickyNoteProps {
   item: StickyNoteType;
   isSelected: boolean;
+  scale?: number;
   onSelect: () => void;
   onUpdate: (updates: Partial<StickyNoteType>) => void;
   onDelete: () => void;
+  onHistorySave?: (prevItem: StickyNoteType, newItem: StickyNoteType) => void;
 }
 
 export function CanvasStickyNote({
   item,
   isSelected,
+  scale = 1,
   onSelect,
   onUpdate,
   onDelete,
+  onHistorySave,
 }: CanvasStickyNoteProps) {
   const [isDragging, setIsDragging] = useState(false);
   const [isResizing, setIsResizing] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const dragStartPos = useRef({ x: 0, y: 0 });
-  const resizeStartSize = useRef({ width: 0, height: 0 });
+
+  // History Snapshots
+  const snapshotRef = useRef<StickyNoteType | null>(null);
+
+  // Store INITIAL values at start of drag
+  const dragStartRef = useRef({
+    mouseX: 0,
+    mouseY: 0,
+    itemX: 0,
+    itemY: 0,
+    itemWidth: 0,
+    itemHeight: 0
+  });
 
   const handleDragStart = (e: React.MouseEvent) => {
     if ((e.target as HTMLElement).closest('.resize-handle')) return;
     e.preventDefault();
     setIsDragging(true);
-    dragStartPos.current = { x: e.clientX - item.x, y: e.clientY - item.y };
+    snapshotRef.current = { ...item }; // Snapshot
+    // Store everything needed to calculate new position based on delta
+    dragStartRef.current = {
+      mouseX: e.clientX,
+      mouseY: e.clientY,
+      itemX: item.x,
+      itemY: item.y,
+      itemWidth: 0,
+      itemHeight: 0
+    };
   };
 
   const handleDrag = (e: MouseEvent) => {
     if (!isDragging) return;
+
+    const deltaX = (e.clientX - dragStartRef.current.mouseX) / scale;
+    const deltaY = (e.clientY - dragStartRef.current.mouseY) / scale;
+
     onUpdate({
-      x: Math.max(0, e.clientX - dragStartPos.current.x),
-      y: Math.max(0, e.clientY - dragStartPos.current.y),
+      x: dragStartRef.current.itemX + deltaX,
+      y: dragStartRef.current.itemY + deltaY,
     });
   };
 
-  const handleDragEnd = () => setIsDragging(false);
+  const handleDragEnd = () => {
+    if (isDragging) {
+      setIsDragging(false);
+      if (onHistorySave && snapshotRef.current && (snapshotRef.current.x !== item.x || snapshotRef.current.y !== item.y)) {
+        onHistorySave(snapshotRef.current, item);
+      }
+    }
+  };
 
   const handleResizeStart = (e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
     setIsResizing(true);
-    resizeStartSize.current = { width: item.width, height: item.height };
-    dragStartPos.current = { x: e.clientX, y: e.clientY };
+    snapshotRef.current = { ...item }; // Snapshot
+    dragStartRef.current = {
+      mouseX: e.clientX,
+      mouseY: e.clientY,
+      itemX: 0,
+      itemY: 0,
+      itemWidth: item.width,
+      itemHeight: item.height
+    };
   };
 
   const handleResize = (e: MouseEvent) => {
     if (!isResizing) return;
-    const deltaX = e.clientX - dragStartPos.current.x;
-    const deltaY = e.clientY - dragStartPos.current.y;
+
+    const deltaX = (e.clientX - dragStartRef.current.mouseX) / scale;
+    const deltaY = (e.clientY - dragStartRef.current.mouseY) / scale;
+
     onUpdate({
-      width: Math.max(150, resizeStartSize.current.width + deltaX),
-      height: Math.max(100, resizeStartSize.current.height + deltaY),
+      width: Math.max(150, dragStartRef.current.itemWidth + deltaX),
+      height: Math.max(100, dragStartRef.current.itemHeight + deltaY),
     });
   };
 
-  const handleResizeEnd = () => setIsResizing(false);
+  const handleResizeEnd = () => {
+    if (isResizing) {
+      setIsResizing(false);
+      if (onHistorySave && snapshotRef.current && (snapshotRef.current.width !== item.width || snapshotRef.current.height !== item.height)) {
+        onHistorySave(snapshotRef.current, item);
+      }
+    }
+  };
 
   useEffect(() => {
     if (isDragging) {
@@ -93,6 +144,37 @@ export function CanvasStickyNote({
       };
     }
   }, [isResizing]);
+
+  const handleFocus = () => {
+    snapshotRef.current = { ...item };
+  };
+
+  const handleBlur = () => {
+    if (snapshotRef.current && onHistorySave && snapshotRef.current.content !== item.content) {
+      onHistorySave(snapshotRef.current, item);
+    }
+  };
+
+  // Color update wrapper
+  const handleColorChange = (newColor: StickyNoteType['color']) => {
+    const prevItem = { ...item };
+    onUpdate({ color: newColor });
+    if (onHistorySave) {
+      // We pass the hypothetical new item state for history
+      // But onUpdate passes partial. 
+      // We can construct full items.
+      onHistorySave(prevItem, { ...item, color: newColor });
+    }
+  };
+
+  // Sync content if changed externally
+  useEffect(() => {
+    if (textareaRef.current && textareaRef.current.value !== item.content) {
+      if (document.activeElement !== textareaRef.current) {
+        textareaRef.current.value = item.content || '';
+      }
+    }
+  }, [item.content]);
 
   return (
     <motion.div
@@ -136,7 +218,7 @@ export function CanvasStickyNote({
                       STICKY_COLORS[color],
                       item.color === color ? 'border-primary' : 'border-transparent'
                     )}
-                    onClick={() => onUpdate({ color })}
+                    onClick={() => handleColorChange(color)}
                   />
                 ))}
               </div>
@@ -159,8 +241,12 @@ export function CanvasStickyNote({
       {/* Content */}
       <textarea
         ref={textareaRef}
-        value={item.content}
+        defaultValue={item.content}
         onChange={(e) => onUpdate({ content: e.target.value })}
+        onFocus={handleFocus}
+        onBlur={handleBlur}
+        onKeyDown={(e) => e.stopPropagation()}
+        onMouseDown={(e) => e.stopPropagation()}
         placeholder="Write a note..."
         className="w-full h-[calc(100%-32px)] p-2 bg-transparent resize-none outline-none text-sm placeholder:text-gray-500"
         style={{ fontFamily: "'Caveat', cursive" }}
