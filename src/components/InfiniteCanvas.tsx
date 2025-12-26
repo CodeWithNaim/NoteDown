@@ -763,38 +763,50 @@ export function InfiniteCanvas() {
       activePage.page.canvasItems.forEach(item => {
         if (item.type !== 'drawing') return;
 
-        // Parse the SVG path to get points
-        const pathParts = item.paths.match(/[ML]\s*[\d.-]+\s*[\d.-]+/g);
-        if (!pathParts) return;
-
-        const points: { x: number; y: number }[] = [];
-        pathParts.forEach(part => {
-          const nums = part.match(/[\d.-]+/g);
-          if (nums && nums.length >= 2) {
-            points.push({ x: parseFloat(nums[0]), y: parseFloat(nums[1]) });
-          }
-        });
-
         // Check if eraser point is close to any line segment in the path
         let isNearPath = false;
-        for (let i = 0; i < points.length - 1; i++) {
-          const p1 = points[i];
-          const p2 = points[i + 1];
 
-          // Calculate distance from point to line segment
-          const dist = distanceToLineSegment(canvasX, canvasY, p1.x, p1.y, p2.x, p2.y);
-          const threshold = eraserRadius + (item.strokeWidth || 3) / 2;
+        const isPointNearSvgPath = (pathData: string, px: number, py: number, threshold: number) => {
+          // Robust parsing: extract all coordinate pairs regardless of SVG command (M, L, Q, C, etc.)
+          const nums = pathData.match(/[-+]?\d*\.?\d+/g);
+          if (!nums || nums.length < 2) return false;
 
-          if (dist <= threshold) {
-            isNearPath = true;
-            break;
+          const points: { x: number; y: number }[] = [];
+          for (let i = 0; i < nums.length; i += 2) {
+            if (nums[i + 1] !== undefined) {
+              points.push({ x: parseFloat(nums[i]), y: parseFloat(nums[i + 1]) });
+            }
           }
-        }
 
-        if (isNearPath) {
-          pushToUndoStack({ type: 'DELETE', item });
-          deleteCanvasItem(activePage.notebook.id, activePage.section.id, activePage.page.id, item.id);
-          toast.dismiss();
+          for (let i = 0; i < points.length - 1; i++) {
+            const p1 = points[i];
+            const p2 = points[i + 1];
+            const dist = distanceToLineSegment(px, py, p1.x, p1.y, p2.x, p2.y);
+            if (dist <= threshold) return true;
+          }
+          return false;
+        };
+
+        if (isPointNearSvgPath(item.paths, canvasX, canvasY, eraserRadius + (item.strokeWidth || 3) / 2)) {
+          // It hit the object! BUT is this area masked (erased)?
+          let isMasked = false;
+          if (item.maskPaths && item.maskPaths.length > 0) {
+            for (const mask of item.maskPaths) {
+              // Check if we are hitting the mask "stroke"
+              // Add safety buffer (+5px) to detect "void" more aggressively
+              const maskThreshold = (mask.strokeWidth || 10) / 2 + 5;
+              if (isPointNearSvgPath(mask.path, canvasX, canvasY, maskThreshold)) {
+                isMasked = true;
+                break;
+              }
+            }
+          }
+
+          if (!isMasked) {
+            pushToUndoStack({ type: 'DELETE', item });
+            deleteCanvasItem(activePage.notebook.id, activePage.section.id, activePage.page.id, item.id);
+            toast.dismiss();
+          }
         }
       });
     }
