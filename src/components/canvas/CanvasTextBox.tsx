@@ -60,6 +60,10 @@ export function CanvasTextBox({
     itemHeight: 0
   });
 
+  // Track latest item state for event listeners
+  const itemRef = useRef(item);
+  itemRef.current = item;
+
   const handleDragStart = (e: React.MouseEvent) => {
     if ((e.target as HTMLElement).closest('.resize-handle')) return;
     // Don't drag if clicking inside content (allow text selection)
@@ -93,9 +97,10 @@ export function CanvasTextBox({
   const handleDragEnd = () => {
     if (isDragging) {
       setIsDragging(false);
-      // Save history if moved
-      if (onHistorySave && snapshotRef.current && (snapshotRef.current.x !== item.x || snapshotRef.current.y !== item.y)) {
-        onHistorySave(snapshotRef.current, item);
+      // Use ref to get latest state inside stale closure
+      const currentItem = itemRef.current;
+      if (onHistorySave && snapshotRef.current && (snapshotRef.current.x !== currentItem.x || snapshotRef.current.y !== currentItem.y)) {
+        onHistorySave(snapshotRef.current, currentItem);
       }
     }
   };
@@ -130,9 +135,10 @@ export function CanvasTextBox({
   const handleResizeEnd = () => {
     if (isResizing) {
       setIsResizing(false);
-      // Save history if resized
-      if (onHistorySave && snapshotRef.current && (snapshotRef.current.width !== item.width || snapshotRef.current.height !== item.height)) {
-        onHistorySave(snapshotRef.current, item);
+      // Use ref to get latest state inside stale closure
+      const currentItem = itemRef.current;
+      if (onHistorySave && snapshotRef.current && (snapshotRef.current.width !== currentItem.width || snapshotRef.current.height !== currentItem.height)) {
+        onHistorySave(snapshotRef.current, currentItem);
       }
     }
   };
@@ -146,8 +152,7 @@ export function CanvasTextBox({
         window.removeEventListener('mouseup', handleDragEnd);
       };
     }
-  }, [isDragging]); // Added item dependency to capture latest state in handleDragEnd - Wait, handleDragEnd is closed over "item"? Yes.
-  // Actually, we need to be careful. The 'item' in closure might be stale if re-render happens during drag.
+  }, [isDragging]);
   // But typically drag is smooth. Ideally use ref or dependency.
   // Better pattern: handleDragEnd uses 'item' from props. useEffect needs to depend on it? No, that would re-bind listener.
   // Re-binding is fine if cheap. or use a ref for current item.

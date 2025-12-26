@@ -76,7 +76,19 @@ export function InfiniteCanvas() {
     setUndoStack(prev => {
       const last = prev[prev.length - 1];
       // Coalesce ADD + UPDATE (e.g. Create Box -> Type immediately)
-      if (action.type === 'UPDATE' && last && last.type === 'ADD' && last.item.id === action.newItem.id) {
+      // Only for types where initial creation precedes immediate content editing
+      // AND ensuring we don't merge spatial changes (Move/Resize) into creation
+      if (
+        action.type === 'UPDATE' &&
+        last &&
+        last.type === 'ADD' &&
+        last.item.id === action.newItem.id &&
+        (action.newItem.type === 'text' || action.newItem.type === 'sticky' || action.newItem.type === 'todo') &&
+        last.item.x === action.newItem.x &&
+        last.item.y === action.newItem.y &&
+        last.item.width === action.newItem.width &&
+        last.item.height === action.newItem.height
+      ) {
         console.log('[Undo] Coalescing ADD+UPDATE for atomic creation');
         return [...prev.slice(0, -1), { type: 'ADD', item: action.newItem }];
       }
@@ -549,6 +561,9 @@ export function InfiniteCanvas() {
               const newMasks = [...(item.maskPaths || []), newMaskEntry];
               // Deep copy to prevent reference issues in undo stack
               const prevItemCopy = JSON.parse(JSON.stringify(item));
+              // CRITICAL FIX: Ensure maskPaths key exists to FORCE overwrite during Undo
+              if (!prevItemCopy.maskPaths) prevItemCopy.maskPaths = [];
+
               const newItem = { ...item, maskPaths: newMasks };
               const newItemCopy = JSON.parse(JSON.stringify(newItem));
               updateCanvasItem(currentActivePage.notebook.id, currentActivePage.section.id, currentActivePage.page.id, item.id, { maskPaths: newMasks });
