@@ -46,7 +46,8 @@ export interface CanvasStickyNote {
   width: number;
   height: number;
   content: string;
-  color: 'yellow' | 'pink' | 'blue' | 'green' | 'purple';
+  color: string; // Supports hex colors like '#FEF08A' or legacy names like 'yellow'
+  textColor?: string; // Text color, defaults to dark gray if not set
 }
 
 export interface CanvasTable {
@@ -59,6 +60,15 @@ export interface CanvasTable {
   rows: number;
   cols: number;
   cells: string[][];
+  tableStyle?: 'default' | 'ocean' | 'forest' | 'sunset' | 'purple';
+  headerColor?: string; // Custom header/accent color
+  textColor?: string; // Custom text color
+  bgColor?: string; // Background color - header/footer will be darker shade
+  textAlign?: 'left' | 'center' | 'right';
+  textSize?: number;
+  fontFamily?: string;
+  cellStyles?: { [key: string]: { textColor?: string; textAlign?: 'left' | 'center' | 'right'; textSize?: number; fontFamily?: string } };
+  hideBorder?: boolean;
 }
 
 export interface CanvasTodoList {

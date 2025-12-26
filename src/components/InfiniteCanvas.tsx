@@ -493,7 +493,7 @@ export function InfiniteCanvas() {
         rows: 3,
         cols: 3,
         cells: [
-          ['Column 1', 'Column 2', 'Column 3'],
+          ['', '', ''],
           ['', '', ''],
           ['', '', ''],
         ],
@@ -1083,6 +1083,7 @@ export function InfiniteCanvas() {
                               item.id
                             );
                           }}
+                          onHistorySave={handleHistorySave}
                         />
                       </div>
                     );
