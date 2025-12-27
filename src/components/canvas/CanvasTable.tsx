@@ -103,11 +103,12 @@ interface CanvasTableProps {
   onHistorySave?: (prevItem: TableType, newItem: TableType) => void;
 }
 
-// Memoized Grid Component to prevent re-renders when activeFormats changes
+  // Memoized Grid Component
 const TableGrid = memo(({
   item,
   colWidths,
   focusedCell,
+  isEditing, // NEW PROP
   inputRefs,
   handleInput,
   handleKeyDown,
@@ -117,17 +118,22 @@ const TableGrid = memo(({
   handleMouseUp,
   handlePaste,
   onSelect,
-  // Style defaults
   defaultTextColor,
   defaultAlign = 'left',
   defaultFontSize = 14,
   defaultFontFamily = 'Inter',
   showControls,
-  borderColor
+  borderColor,
+  selectionRange,
+  handleCellMouseDown,
+  handleCellMouseEnter,
+  handleCellMouseUp,
+  handleDoubleClick, // NEW PROP
 }: {
   item: TableType;
   colWidths: (number | string)[];
   focusedCell: { row: number; col: number } | null;
+  isEditing: boolean;
   inputRefs: React.MutableRefObject<{ [key: string]: HTMLElement | null }>;
   handleInput: (e: React.FormEvent<HTMLDivElement>, rowIndex: number, colIndex: number) => void;
   handleKeyDown: (e: React.KeyboardEvent, rowIndex: number, colIndex: number) => void;
@@ -143,9 +149,29 @@ const TableGrid = memo(({
   defaultFontFamily?: string;
   showControls?: boolean;
   borderColor: string;
+  selectionRange: { start: { row: number, col: number }, end: { row: number, col: number } } | null;
+  handleCellMouseDown: (r: number, c: number) => void;
+  handleCellMouseEnter: (r: number, c: number) => void;
+  handleCellMouseUp: () => void;
+  handleDoubleClick: (r: number, c: number) => void;
 }) => {
-  // Track which cells have been initialized to avoid overwriting during typing
   const initializedCells = useRef<Set<string>>(new Set());
+
+  // Sync cell content from props to DOM
+  useEffect(() => {
+    item.cells.forEach((row, r) => {
+      row.forEach((content, c) => {
+        const key = `${r}-${c}`;
+        const el = inputRefs.current[key];
+        // If content differs AND (we are NOT editing THIS cell OR simple focus check), update DOM
+        // With isEditing flag, we can be more precise.
+        // If el is activeElement, we generally don't want to touch it while typing.
+        if (el && el !== document.activeElement && el.innerHTML !== content) {
+           el.innerHTML = content;
+        }
+      });
+    });
+  }, [item.cells, focusedCell]);
 
   return (
     <tbody>
@@ -155,18 +181,14 @@ const TableGrid = memo(({
           className="relative group/row"
           style={{ borderBottom: rowIndex < item.cells.length - 1 ? `1px solid ${borderColor}` : 'none' }}
         >
-          {/* Row Rendering Logic */}
           {row.map((cellContent, colIndex) => {
             const isHeader = rowIndex === 0;
             const cellStyles = item.cellStyles?.[rowIndex]?.[colIndex];
-            // Resolve styles with fallbacks
             const textColor = cellStyles?.textColor || defaultTextColor;
-            // Header center aligns by default unless overridden, Body uses global default
             const textAlign = cellStyles?.textAlign || (isHeader ? 'center' : defaultAlign);
             const fontSize = cellStyles?.textSize || defaultFontSize;
             const fontFamily = cellStyles?.fontFamily || defaultFontFamily;
 
-            // Flags
             const isBold = cellStyles?.isBold ?? (isHeader || item.isBold);
             const isItalic = cellStyles?.isItalic ?? item.isItalic;
             const isUnderline = cellStyles?.isUnderline ?? item.isUnderline;
@@ -174,24 +196,45 @@ const TableGrid = memo(({
             const isSub = cellStyles?.isSubscript;
             const isSuper = cellStyles?.isSuperscript;
 
+            const isSelected = selectionRange && 
+              rowIndex >= Math.min(selectionRange.start.row, selectionRange.end.row) &&
+              rowIndex <= Math.max(selectionRange.start.row, selectionRange.end.row) &&
+              colIndex >= Math.min(selectionRange.start.col, selectionRange.end.col) &&
+              colIndex <= Math.max(selectionRange.start.col, selectionRange.end.col);
+
+            const isFocused = focusedCell?.row === rowIndex && focusedCell?.col === colIndex;
+            const isEditingCell = isFocused && isEditing;
+
             const cellKey = `${rowIndex}-${colIndex}`;
+            let cellWidth = colWidths[colIndex];
+            if (typeof cellWidth === 'string' && cellWidth.endsWith('%') && item.width) {
+              const percent = parseFloat(cellWidth);
+              cellWidth = `${(item.width * percent) / 100}px`;
+            }
 
             return (
               <td
                 key={cellKey}
                 className={cn(
-                  "relative p-0 align-top transition-colors duration-200"
+                  "relative p-0 align-top transition-colors duration-200 cursor-text group/cell"
                 )}
                 style={{
-                  width: colWidths[colIndex],
-                  backgroundColor: cellStyles?.backgroundColor || 'transparent',
+                  minWidth: cellWidth,
+                  width: cellWidth,
+                  backgroundColor: isSelected ? 'rgba(14, 165, 233, 0.05)' : (cellStyles?.backgroundColor || 'transparent'),
                   borderRight: colIndex < row.length - 1 ? `1px solid ${borderColor}` : 'none',
                 }}
+                data-row={rowIndex}
+                data-col={colIndex}
+                onClick={() => {
+                   inputRefs.current[cellKey]?.focus();
+                }}
+                onMouseDown={(e) => handleCellMouseDown(rowIndex, colIndex)}
+                onDoubleClick={() => handleDoubleClick(rowIndex, colIndex)}
               >
                 <div
                   ref={(el) => {
                     inputRefs.current[cellKey] = el;
-                    // Initialize content only once when element is first mounted
                     if (el && !initializedCells.current.has(cellKey)) {
                       el.innerHTML = cellContent;
                       initializedCells.current.add(cellKey);
@@ -200,8 +243,16 @@ const TableGrid = memo(({
                   contentEditable
                   suppressContentEditableWarning
                   className={cn(
-                    "w-full h-full min-h-[32px] p-2 outline-none resize-none overflow-hidden bg-transparent whitespace-pre-wrap break-words",
+                    "h-full min-h-[32px] p-2 outline-none resize-none overflow-hidden bg-transparent whitespace-nowrap",
                     "selection:bg-primary/20",
+                    // Hide Caret/Selection if NOT editing
+                    // Always allow interaction
+                    "caret-auto selection:bg-primary/20 cursor-text"
+                    // Actually, if pointer-events-none, we can't focus?
+                    // But 'td' onClick handles focus.
+                    // Wait, if pointer-events-none, we can't select text partially. Good for Excel behavior.
+                    // But we rely on 'focus' on DIV.
+                    // Let's remove pointer-events-none and rely on caret-transparent.
                   )}
                   style={{
                     color: textColor,
@@ -212,7 +263,8 @@ const TableGrid = memo(({
                     fontStyle: isItalic ? 'italic' : 'normal',
                     textDecoration: (isUnderline || isStrike) ? `${isUnderline ? 'underline ' : ''}${isStrike ? 'line-through' : ''}`.trim() : 'none',
                     verticalAlign: isSub ? 'sub' : isSuper ? 'super' : 'baseline',
-                    lineHeight: isSub || isSuper ? '1' : 1.5
+                    lineHeight: isSub || isSuper ? '1' : 1.5,
+                    // caretColor: !isEditingCell ? 'transparent' : 'auto', // Explicit Style
                   }}
                   onInput={(e) => handleInput(e, rowIndex, colIndex)}
                   onKeyDown={(e) => handleKeyDown(e, rowIndex, colIndex)}
@@ -235,10 +287,12 @@ const TableGrid = memo(({
 TableGrid.displayName = 'TableGrid';
 
 export function CanvasTable({ item, isSelected, scale = 1, onSelect, onUpdate, onDelete, onHistorySave }: CanvasTableProps) {
+  const [isEditMode, setIsEditMode] = useState(false); // NEW STATE
   const [isDragging, setIsDragging] = useState(false);
   const [isResizing, setIsResizing] = useState(false);
   const [isHovered, setIsHovered] = useState(false);
   const [focusedCell, setFocusedCell] = useState<{ row: number; col: number } | null>(null);
+
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [activeColorPicker, setActiveColorPicker] = useState<'accent' | 'bg' | 'text' | null>(null);
   const [colorScope, setColorScope] = useState<'cell' | 'table'>('table');
@@ -261,6 +315,10 @@ export function CanvasTable({ item, isSelected, scale = 1, onSelect, onUpdate, o
   const cellHistoryRef = useRef<{ [key: string]: { html: string; caret: number }[] }>({});
   const cellHistoryIndexRef = useRef<{ [key: string]: number }>({});
   const isUndoingRef = useRef(false);
+  
+  // Range Selection State
+  const [selectionRange, setSelectionRange] = useState<{ start: { row: number, col: number }, end: { row: number, col: number } } | null>(null);
+  const isSelectingRef = useRef(false);
 
   const currentStyleKey = (item.tableStyle || 'default') as TableStyleKey;
   const accentColor = item.headerColor || TABLE_STYLES[currentStyleKey]?.baseColor || '#374151';
@@ -680,6 +738,28 @@ export function CanvasTable({ item, isSelected, scale = 1, onSelect, onUpdate, o
   };
 
   const handleKeyDown = (e: React.KeyboardEvent, rowIndex: number, colIndex: number) => {
+    // Excel-like Overwrite Logic
+    // If typing printable char and NOT editing -> Overwrite
+    if (!isEditMode && !e.ctrlKey && !e.altKey && !e.metaKey && e.key.length === 1 && !e.key.match(/F\d+/)) {
+        e.preventDefault();
+        const cellEl = inputRefs.current[`${rowIndex}-${colIndex}`];
+        if (cellEl) {
+            cellEl.innerHTML = e.key;
+            // Move caret to end
+            setCaretIndex(cellEl, 1);
+            setIsEditMode(true); 
+            // Trigger Update
+            updateCell(rowIndex, colIndex, e.key);
+        }
+        return;
+    }
+    
+    // F2 Logic
+    if (e.key === 'F2') {
+        setIsEditMode(true);
+        return;
+    }
+
     // Escape cursor from sub/sup tags when typing at the end
     if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) {
       const sel = window.getSelection();
@@ -737,21 +817,62 @@ export function CanvasTable({ item, isSelected, scale = 1, onSelect, onUpdate, o
       }
     }
     
+    
     // Handle Ctrl+Z (Undo) and Ctrl+Y/Ctrl+Shift+Z (Redo)
     const isCtrl = e.ctrlKey || e.metaKey;
     const key = e.key.toLowerCase();
     
+    // RESTORED LOCAL UNDO LOGIC
+    // This allows character-by-character undo (Tying) to work locally.
+    // Yet it STILL bubbles to Global Undo if:
+    // 1. Content mismatch (Paste)
+    // 2. Start of history (Index 0)
+    
     if (isCtrl && (key === 'z' || key === 'y')) {
-      e.preventDefault();
-      e.stopPropagation();
-      
       const cellKey = `${rowIndex}-${colIndex}`;
       const cellEl = inputRefs.current[cellKey];
       if (!cellEl) return;
-      
-      const isRedo = e.shiftKey || key === 'y';
+
       const history = cellHistoryRef.current[cellKey] || [];
       let index = cellHistoryIndexRef.current[cellKey] ?? 0;
+      const historyState = history[index];
+
+      // If content mismatches local history (e.g. after a Paste), let Global Undo handle it
+      if (historyState && historyState.html !== cellEl.innerHTML) {
+         e.preventDefault(); // BLOCK NATIVE UNDO
+         cellEl.blur(); 
+         // Force Bubble via Dispatch
+         setTimeout(() => {
+            document.body.dispatchEvent(new KeyboardEvent('keydown', {
+               key: e.key, code: e.code, ctrlKey: true, metaKey: e.metaKey, shiftKey: e.shiftKey, bubbles: true
+            }));
+         }, 0);
+         return;
+      }
+
+      const isRedo = e.shiftKey || key === 'y';
+
+      // If cannot undo locally (start of history), bubble to Global Undo
+      if (!isRedo && index === 0) {
+        e.preventDefault(); // BLOCK NATIVE UNDO
+        cellEl.blur();
+        // Force Bubble via Dispatch
+        setTimeout(() => {
+            document.body.dispatchEvent(new KeyboardEvent('keydown', {
+               key: e.key, code: e.code, ctrlKey: true, metaKey: e.metaKey, shiftKey: e.shiftKey, bubbles: true
+            }));
+         }, 0);
+        return;
+      }
+      
+      // If cannot redo locally (end of history), bubble
+      if (isRedo && index >= history.length - 1) {
+        return;
+      }
+
+      // HANDLE LOCAL UNDO
+      e.preventDefault(); // Prevent Browser Undo
+      e.stopPropagation(); // Stop Global Undo from running
       
       if (isRedo) { // REDO
         if (index < history.length - 1) {
@@ -785,6 +906,58 @@ export function CanvasTable({ item, isSelected, scale = 1, onSelect, onUpdate, o
       return;
     }
     
+    // --- NAVIGATION LOGIC (Excel-like) ---
+    if (!isCtrl && !e.altKey && !e.metaKey) {
+       // Arrow Up
+       if (key === 'arrowup') {
+          if (rowIndex > 0) {
+             e.preventDefault();
+             inputRefs.current[`${rowIndex - 1}-${colIndex}`]?.focus();
+          }
+       }
+       // Arrow Down / Enter
+       else if (key === 'arrowdown' || (key === 'enter' && !e.shiftKey)) {
+          if (rowIndex < item.rows - 1) {
+             e.preventDefault();
+             inputRefs.current[`${rowIndex + 1}-${colIndex}`]?.focus();
+          }
+       }
+       // Arrow Left
+       else if (key === 'arrowleft') {
+          const caret = getCaretIndex(e.currentTarget as HTMLElement);
+          if (caret === 0 && colIndex > 0) {
+             e.preventDefault();
+             inputRefs.current[`${rowIndex}-${colIndex - 1}`]?.focus();
+          }
+       }
+       // Arrow Right
+       else if (key === 'arrowright') {
+          const target = e.currentTarget as HTMLElement;
+          const caret = getCaretIndex(target);
+          if (caret >= (target.textContent?.length || 0) && colIndex < item.cols - 1) {
+             e.preventDefault();
+             inputRefs.current[`${rowIndex}-${colIndex + 1}`]?.focus();
+          }
+       }
+       // Tab / Shift+Tab
+       else if (key === 'tab') {
+          e.preventDefault();
+          if (e.shiftKey) { // Previous
+             if (colIndex > 0) {
+                 inputRefs.current[`${rowIndex}-${colIndex - 1}`]?.focus();
+             } else if (rowIndex > 0) {
+                 inputRefs.current[`${rowIndex - 1}-${item.cols - 1}`]?.focus();
+             }
+          } else { // Next
+             if (colIndex < item.cols - 1) {
+                 inputRefs.current[`${rowIndex}-${colIndex + 1}`]?.focus();
+             } else if (rowIndex < item.rows - 1) {
+                 inputRefs.current[`${rowIndex + 1}-0`]?.focus();
+             }
+          }
+       }
+    }
+
     if (e.key === 'Enter' && e.ctrlKey) {
       e.preventDefault();
       if (rowIndex === item.rows - 1) {
@@ -848,6 +1021,199 @@ export function CanvasTable({ item, isSelected, scale = 1, onSelect, onUpdate, o
     }
   };
 
+  // Range Selection Handlers
+  const handleCellMouseDown = (r: number, c: number) => {
+    // Exit edit mode on new selection (Excel behavior)
+    // Notion-like: Always allow editing/selection
+    // setIsEditMode(false); // REMOVED: Don't exit edit mode
+    setIsEditMode(true); // Always ensure we are 'editing' so other logic holds
+
+    // Only start selection if not resizing
+    if (isResizing) return;
+    
+    isSelectingRef.current = true;
+    setSelectionRange({ start: { row: r, col: c }, end: { row: r, col: c } });
+    
+    // Don't blur immediately - let user select text if they stay in cell
+    // We will blur in mousemove if they drag outside
+  };
+
+  const handleDoubleClick = (r: number, c: number) => {
+      setIsEditMode(true);
+      // Explicitly focus cell
+      inputRefs.current[`${r}-${c}`]?.focus();
+  };
+
+  // Global mouse tracking for robust selection
+  useEffect(() => {
+    const handleGlobalMouseMove = (e: MouseEvent) => {
+      if (!isSelectingRef.current) return;
+
+      const el = document.elementFromPoint(e.clientX, e.clientY);
+      const td = el?.closest('td');
+      
+      if (td) {
+        const r = parseInt(td.getAttribute('data-row') || '-1');
+        const c = parseInt(td.getAttribute('data-col') || '-1');
+        
+        if (r !== -1 && c !== -1) {
+          setSelectionRange(prev => {
+             if (!prev) return null;
+             
+             // If we have dragged to a DIFFERENT cell than start
+             if (prev.start.row !== r || prev.start.col !== c) {
+                // If we were in text edit mode (activeElement exists), blur it now
+                // This switches behavior from text selection to cell selection
+                if (document.activeElement instanceof HTMLElement && document.activeElement.isContentEditable) {
+                   document.activeElement.blur();
+                   window.getSelection()?.removeAllRanges();
+                }
+             }
+             
+             return { ...prev, end: { row: r, col: c } };
+          });
+        }
+      }
+    };
+
+    const handleGlobalMouseUp = () => {
+      isSelectingRef.current = false;
+    };
+
+    // Add listeners to window to capture events even if mouse leaves table
+    window.addEventListener('mousemove', handleGlobalMouseMove);
+    window.addEventListener('mouseup', handleGlobalMouseUp);
+    
+    return () => {
+      window.removeEventListener('mousemove', handleGlobalMouseMove);
+      window.removeEventListener('mouseup', handleGlobalMouseUp);
+    };
+  }, []);
+
+  // Handle Copy for Selection Range
+  // Handle Copy for Selection Range (Ctrl+C)
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Check for Copy (Ctrl+C), Cut (Ctrl+X), or Delete (Backspace/Delete)
+      const isCmd = e.ctrlKey || e.metaKey;
+      const isCopy = isCmd && e.key === 'c';
+      const isCut = isCmd && e.key === 'x';
+      const isDelete = e.key === 'Delete' || e.key === 'Backspace';
+
+      if (isCopy || isCut || isDelete) {
+        if (!selectionRange) return; 
+
+        const { start, end } = selectionRange;
+        const isMultiCell = start.row !== end.row || start.col !== end.col;
+
+        // Check if text is selected within a cell
+        if (document.activeElement instanceof HTMLElement && document.activeElement.isContentEditable) {
+           // If editing a cell, prioritize text action UNLESS selection spans multiple cells
+           // For Delete -> If editing text, let browser handle backspace/delete
+           // For Cut/Copy -> If editing text, let browser handle it
+           if (!isMultiCell) return;
+        }
+
+        const minR = Math.min(start.row, end.row);
+        const maxR = Math.max(start.row, end.row);
+        const minC = Math.min(start.col, end.col);
+        const maxC = Math.max(start.col, end.col);
+
+        // PERFORM COPY / CUT-COPY Logic
+        if (isCopy || isCut) {
+           e.preventDefault();
+           console.log(isCut ? 'Cutting range:' : 'Copying range:', { minR, maxR, minC, maxC });
+
+           let tsv = "";
+           let html = "<table><tbody>";
+
+           for (let r = minR; r <= maxR; r++) {
+              html += "<tr>";
+              let rowLine = [];
+              for (let c = minC; c <= maxC; c++) {
+                 const cellContent = item.cells[r]?.[c] || "";
+                 // Strip HTML for TSV
+                 const div = document.createElement('div');
+                 div.innerHTML = cellContent;
+                 let text = div.textContent || "";
+                 rowLine.push(text);
+                 
+                 // Keep HTML for rich paste
+                 html += `<td style="border:1px solid #000;">${cellContent}</td>`;
+              }
+              tsv += rowLine.join("\t") + "\n";
+              html += "</tr>";
+           }
+           html += "</tbody></table>";
+
+           // Use Clipboard API
+           if (navigator.clipboard) {
+              navigator.clipboard.writeText(tsv).then(() => {
+                 setSelectionRange(undefined);
+                 console.log('Text copied to clipboard');
+                 try {
+                     const type = "text/html";
+                     const blob = new Blob([html], { type });
+                     const data = [new ClipboardItem({ 
+                         [type]: blob,
+                         ["text/plain"]: new Blob([tsv], { type: "text/plain" })
+                     })];
+                     navigator.clipboard.write(data).catch(e => console.warn("HTML copy failed, text only", e));
+                 } catch (e) {
+                     console.warn("ClipboardItem not supported", e);
+                 }
+              }).catch(err => {
+                  console.error('Clipboard action failed:', err);
+              });
+           }
+        }
+
+        // PERFORM DELETE / CUT Logic (Clear Cells)
+        if (isCut || isDelete) {
+           if (!isCopy) e.preventDefault(); // Prevent default for Cut/Delete (Copy already blocked above)
+           
+           console.log('Clearing range:', { minR, maxR, minC, maxC });
+           
+           // Create Deep Copy of Cells
+           const newCells = item.cells.map(row => [...row]);
+           let hasChanges = false;
+           
+           for (let r = minR; r <= maxR; r++) {
+              for (let c = minC; c <= maxC; c++) {
+                 // Clear Logic
+                 const cellKey = `${r}-${c}`;
+                 
+                 // 1. Clear Store State
+                 if (newCells[r] && newCells[r][c] !== "") {
+                    newCells[r][c] = ""; 
+                    hasChanges = true;
+                 }
+                 
+                 // 2. FORCE Clear DOM Element (Fixes "Ghost" text in active cell)
+                 const cellEl = inputRefs.current[cellKey];
+                 if (cellEl) {
+                    cellEl.innerHTML = "";
+                 }
+                 
+                 // 3. Reset Local History (Optional, to avoid mismatch on next undo? 
+                 // Actually, if we clear DOM, local history mismatch logic handles it correctly.)
+              }
+           }
+           
+           if (hasChanges) {
+               const newItem = { ...item, cells: newCells };
+               onUpdate(newItem);
+               onHistorySave?.(item, newItem);
+           }
+           setSelectionRange(undefined);
+        }
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [selectionRange, item.cells]);
+
   const changeStyle = (style: TableStyleKey) => {
     const newItem = { ...item, tableStyle: style, headerColor: TABLE_STYLES[style].baseColor, bgColor: 'transparent' };
     onUpdate(newItem);
@@ -863,7 +1229,7 @@ export function CanvasTable({ item, isSelected, scale = 1, onSelect, onUpdate, o
       initial={{ scale: 0.95, opacity: 0 }}
       animate={{ scale: tableScale, opacity: 1 }}
       transition={{ duration: 0.15 }}
-      style={{ left: item.x, top: item.y, transformOrigin: 'top left', width: item.width }}
+      style={{ left: item.x, top: item.y, transformOrigin: 'top left', width: 'fit-content', minWidth: item.width || 100 }}
       onClick={onSelect}
       onMouseEnter={() => setIsHovered(true)}
       onMouseLeave={() => setIsHovered(false)}
@@ -1545,11 +1911,12 @@ export function CanvasTable({ item, isSelected, scale = 1, onSelect, onUpdate, o
           border: `2px solid ${isSelected ? '#0EA5E9' : displayBorderColor}`,
         }}
       >
-        <table className="w-full border-collapse table-fixed">
+        <table className="border-collapse" style={{ tableLayout: 'auto', minWidth: '100%' }}>
           <TableGrid
             item={item}
             colWidths={colWidths}
             focusedCell={focusedCell}
+            isEditing={isEditMode}
             inputRefs={inputRefs}
             handleInput={(e, r, c) => {
               const cellKey = `${r}-${c}`;
@@ -1588,7 +1955,91 @@ export function CanvasTable({ item, isSelected, scale = 1, onSelect, onUpdate, o
             }}
             handlePaste={(e) => {
               e.preventDefault();
-              const text = e.clipboardData.getData('text/plain');
+              const clipboardData = e.clipboardData;
+              const html = clipboardData.getData('text/html');
+              const text = clipboardData.getData('text/plain');
+
+              // Try to parse HTML table first
+              if (html && html.includes('<table')) {
+                 const parser = new DOMParser();
+                 const doc = parser.parseFromString(html, 'text/html');
+                 const rows = doc.querySelectorAll('tr');
+                 
+                 if (rows.length > 0) {
+                    const startRow = focusedCell?.row || 0;
+                    const startCol = focusedCell?.col || 0;
+                    
+                    // Create copy of cells to modify
+                    let newCells = item.cells.map(r => [...r]);
+                    let maxRow = item.rows;
+                    let maxCol = item.cols;
+
+                    // Expand table if needed
+                    if (startRow + rows.length > maxRow) {
+                       const rowsToAdd = (startRow + rows.length) - maxRow;
+                       for (let i = 0; i < rowsToAdd; i++) {
+                          newCells.push(new Array(maxCol).fill(""));
+                       }
+                       maxRow += rowsToAdd;
+                    }
+
+                    rows.forEach((tr, rIndex) => {
+                       const cells = tr.querySelectorAll('td, th');
+                       
+                       // Expand cols if needed for this row
+                       if (startCol + cells.length > maxCol) {
+                          const colsToAdd = (startCol + cells.length) - maxCol;
+                          newCells.forEach(row => {
+                             for(let i=0; i<colsToAdd; i++) row.push("");
+                          });
+                          maxCol += colsToAdd;
+                       }
+
+                       cells.forEach((td, cIndex) => {
+                          const targetR = startRow + rIndex;
+                          const targetC = startCol + cIndex;
+                          
+                          // Basic text extraction or innerHTML preservation? 
+                          // Let's preserve simple HTML but strip block resizing garbage if any
+                          // For now, innerHTML is best for rich text.
+                          // But we need to be careful of nested tables or complex structures.
+                          // Taking textContent or simple innerHTML.
+                          let content = td.innerHTML;
+                          
+                          // cleanup common copy garbage (like <meta> tags or extensive attrs)
+                          // Simplify: just take text if it looks too complex, or sanitize.
+                          // NoteDown cells use contentEditable div.
+                          
+                          newCells[targetR][targetC] = content;
+
+                          // FORCE UPDATE DOM immediately (especially important for focused cell which is skipped by useEffect)
+                          const key = `${targetR}-${targetC}`;
+                          if (inputRefs.current[key]) {
+                             inputRefs.current[key]!.innerHTML = content;
+                          }
+
+                          // Clear Local History to force Global Undo bubbling for these cells
+                          // This ensures Ctrl+Z triggers the Global Undo (reverting the Paste) instead of getting trapped locally
+                          if (cellHistoryRef.current) {
+                             cellHistoryRef.current[key] = [];
+                             cellHistoryIndexRef.current[key] = 0;
+                          }
+                       });
+                    });
+
+                    // Update item
+                    const newItem = { ...item, cells: newCells, rows: maxRow, cols: maxCol };
+                    
+                    // Update refs to avoid double-save on blur
+                    prevItemRef.current = JSON.parse(JSON.stringify(newItem));
+                    
+                    onUpdate(newItem);
+                    onHistorySave?.(item, newItem);
+                    return;
+                 }
+              }
+
+              // Fallback to text insertion (default behavior)
               document.execCommand('insertText', false, text);
             }}
             onSelect={() => {
@@ -1601,6 +2052,11 @@ export function CanvasTable({ item, isSelected, scale = 1, onSelect, onUpdate, o
             defaultFontFamily={item.fontFamily || 'Inter'}
             showControls={showControls}
             borderColor={borderColor}
+            selectionRange={selectionRange}
+            handleCellMouseDown={handleCellMouseDown}
+            handleCellMouseEnter={() => {}} // Not used anymore
+            handleCellMouseUp={() => {}} // Not used anymore
+            handleDoubleClick={handleDoubleClick}
           />
         </table>
 

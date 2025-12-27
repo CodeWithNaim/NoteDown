@@ -1,0 +1,9 @@
+111:  isEditing, // NEW PROP
+136:  isEditing: boolean;
+167:        // With isEditing flag, we can be more precise.
+206:            const isEditingCell = isFocused && isEditing;
+249:                    !isEditingCell && "caret-transparent selection:bg-transparent cursor-cell pointer-events-none" // pointer-events-none prevents clicking text???
+266:                    caretColor: !isEditingCell ? 'transparent' : 'auto', // Explicit Style
+289:  const [isEditing, setIsEditing] = useState(false); // NEW STATE
+742:    if (!isEditing && !e.ctrlKey && !e.altKey && !e.metaKey && e.key.length === 1 && !e.key.match(/F\d+/)) {
+1914:            isEditing={isEditing}

@@ -71,6 +71,18 @@ export function InfiniteCanvas() {
   const [undoStack, setUndoStack] = useState<HistoryAction[]>([]);
   const [redoStack, setRedoStack] = useState<HistoryAction[]>([]);
 
+  const undoStackRef = useRef<HistoryAction[]>([]);
+  const redoStackRef = useRef<HistoryAction[]>([]);
+
+  // Sync refs with state
+  useEffect(() => {
+    undoStackRef.current = undoStack;
+  }, [undoStack]);
+
+  useEffect(() => {
+    redoStackRef.current = redoStack;
+  }, [redoStack]);
+
   // Helper to push action to undo stack (called after ADD or DELETE)
   const pushToUndoStack = useCallback((action: HistoryAction) => {
     setUndoStack(prev => {
@@ -89,7 +101,6 @@ export function InfiniteCanvas() {
         last.item.width === action.newItem.width &&
         last.item.height === action.newItem.height
       ) {
-        console.log('[Undo] Coalescing ADD+UPDATE for atomic creation');
         return [...prev.slice(0, -1), { type: 'ADD', item: action.newItem }];
       }
       return [...prev, action];
@@ -98,9 +109,18 @@ export function InfiniteCanvas() {
   }, []);
 
   const handleUndo = useCallback(() => {
-    if (!activePage || undoStack.length === 0) return;
+    // Use Ref to get fresh stack without re-binding listener
+    const stack = undoStackRef.current;
+    console.log('[UNDO] Stack Length:', stack.length);
+    if (!activePage || stack.length === 0) return;
 
-    const lastAction = undoStack[undoStack.length - 1];
+    const lastAction = stack[stack.length - 1];
+    console.log('[UNDO] Processing Action:', JSON.stringify({
+      type: lastAction.type,
+      itemId: (lastAction as any).item?.id || (lastAction as any).prevItem?.id,
+      itemType: (lastAction as any).item?.type || (lastAction as any).prevItem?.type,
+    }));
+    
     setUndoStack(prev => prev.slice(0, -1));
 
     if (lastAction.type === 'ADD') {
@@ -133,12 +153,14 @@ export function InfiniteCanvas() {
       toast.dismiss();
       toast.info('Undid update');
     }
-  }, [activePage, undoStack, deleteCanvasItem, addCanvasItem, updateCanvasItem]);
+  }, [activePage, deleteCanvasItem, addCanvasItem, updateCanvasItem]);
 
   const handleRedo = useCallback(() => {
-    if (!activePage || redoStack.length === 0) return;
+    // Use Ref for fresh stack
+    const stack = redoStackRef.current;
+    if (!activePage || stack.length === 0) return;
 
-    const lastAction = redoStack[redoStack.length - 1];
+    const lastAction = stack[stack.length - 1];
     setRedoStack(prev => prev.slice(0, -1));
 
     if (lastAction.type === 'ADD') {
@@ -158,14 +180,12 @@ export function InfiniteCanvas() {
       const currentActivePage = useNotesStore.getState().getActivePage();
       if (!currentActivePage) return;
 
-      console.log('[DEBUG] REDO ACTION:', lastAction.newItem); // VERIFY CONTENT HERE
-
       updateCanvasItem(currentActivePage.notebook.id, currentActivePage.section.id, currentActivePage.page.id, lastAction.newItem.id, lastAction.newItem);
       setUndoStack(prev => [...prev, lastAction]);
       toast.dismiss();
       toast.info('Redid update');
     }
-  }, [activePage, redoStack, addCanvasItem, deleteCanvasItem, updateCanvasItem]);
+  }, [activePage, addCanvasItem, deleteCanvasItem, updateCanvasItem]);
 
   // NEW: Helper to save history for updates
   const handleHistorySave = useCallback((prevItem: CanvasItem, newItem: CanvasItem) => {
