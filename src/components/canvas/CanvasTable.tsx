@@ -1,12 +1,32 @@
-import { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, memo } from 'react';
 import { motion, useDragControls } from 'framer-motion';
-import { MoreHorizontal, X, Plus, Trash2, Columns, Rows, Paintbrush, Type, Palette, ChevronLeft, ArrowUp, ArrowDown, ArrowLeft, ArrowRight, GripVertical, Grid, AlignLeft, AlignCenter, AlignRight, LayoutTemplate, Minus, RotateCcw, Upload, Search } from 'lucide-react';
+import { MoreHorizontal, X, Plus, Trash2, Columns, Rows, Paintbrush, Type, Palette, ChevronLeft, ArrowUp, ArrowDown, ArrowLeft, ArrowRight, GripVertical, Grid, AlignLeft, AlignCenter, AlignRight, LayoutTemplate, Minus, RotateCcw, Upload, Search, Bold, Italic, Underline, Strikethrough, Subscript, Superscript, List, ListOrdered } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { CanvasTable as TableType } from '@/store/useNotesStore';
 import { cn } from '@/lib/utils';
 import { ColorPanel } from './ColorPanel';
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover';
 import { Switch } from '@/components/ui/switch';
+
+const BULLET_ARCHETYPES = ['•', '◦', '▪', '▫', '◆', '◇', '➤', '→', '⇒', '—', '✔', '★', '♥'];
+const toRoman = (num: number) => {
+  const lookup: { [key: string]: number } = { M: 1000, CM: 900, D: 500, CD: 400, C: 100, XC: 90, L: 50, XL: 40, X: 10, IX: 9, V: 5, IV: 4, I: 1 };
+  let roman = '';
+  for (const i in lookup) {
+    while (num >= lookup[i]) { roman += i; num -= lookup[i]; }
+  }
+  return roman;
+}
+const NUMBER_FORMATS = [
+  { id: 'decimal', label: '1. 2. 3.', format: (n: number) => `${n}.` },
+  { id: 'alpha-upper', label: 'A. B. C.', format: (n: number) => `${String.fromCharCode(64 + n)}.` },
+  { id: 'alpha-lower', label: 'a. b. c.', format: (n: number) => `${String.fromCharCode(96 + n)}.` },
+  { id: 'roman-upper', label: 'I. II. III.', format: (n: number) => `${toRoman(n)}.` },
+  { id: 'roman-lower', label: 'i. ii. iii.', format: (n: number) => `${toRoman(n).toLowerCase()}.` },
+  { id: 'decimal-paren-right', label: '1) 2) 3)', format: (n: number) => `${n})` },
+  { id: 'decimal-paren-both', label: '(1) (2)', format: (n: number) => `(${n})` },
+];
+const LIST_PREFIX_REGEX = /^(\s*)(?:•|◦|▪|▫|◆|◇|➤|→|⇒|—|✔|★|♥|\d+\.|[a-zA-Z]\.|[ivxIVX]+\.|[a-zA-Z]\)|[\d]+\)|(?:\(\d+\))) \s*/;
 
 // Table style presets
 const TABLE_STYLES = {
@@ -83,6 +103,137 @@ interface CanvasTableProps {
   onHistorySave?: (prevItem: TableType, newItem: TableType) => void;
 }
 
+// Memoized Grid Component to prevent re-renders when activeFormats changes
+const TableGrid = memo(({
+  item,
+  colWidths,
+  focusedCell,
+  inputRefs,
+  handleInput,
+  handleKeyDown,
+  handleFocus,
+  handleBlur,
+  handleMouseDown,
+  handleMouseUp,
+  handlePaste,
+  onSelect,
+  // Style defaults
+  defaultTextColor,
+  defaultAlign = 'left',
+  defaultFontSize = 14,
+  defaultFontFamily = 'Inter',
+  showControls,
+  borderColor
+}: {
+  item: TableType;
+  colWidths: (number | string)[];
+  focusedCell: { row: number; col: number } | null;
+  inputRefs: React.MutableRefObject<{ [key: string]: HTMLElement | null }>;
+  handleInput: (e: React.FormEvent<HTMLDivElement>, rowIndex: number, colIndex: number) => void;
+  handleKeyDown: (e: React.KeyboardEvent, rowIndex: number, colIndex: number) => void;
+  handleFocus: (rowIndex: number, colIndex: number) => void;
+  handleBlur: () => void;
+  handleMouseDown: () => void;
+  handleMouseUp: () => void;
+  handlePaste: (e: React.ClipboardEvent) => void;
+  onSelect: () => void;
+  defaultTextColor: string;
+  defaultAlign?: 'left' | 'center' | 'right';
+  defaultFontSize?: number;
+  defaultFontFamily?: string;
+  showControls?: boolean;
+  borderColor: string;
+}) => {
+  // Track which cells have been initialized to avoid overwriting during typing
+  const initializedCells = useRef<Set<string>>(new Set());
+
+  return (
+    <tbody>
+      {item.cells.map((row, rowIndex) => (
+        <tr 
+          key={rowIndex} 
+          className="relative group/row"
+          style={{ borderBottom: rowIndex < item.cells.length - 1 ? `1px solid ${borderColor}` : 'none' }}
+        >
+          {/* Row Rendering Logic */}
+          {row.map((cellContent, colIndex) => {
+            const isHeader = rowIndex === 0;
+            const cellStyles = item.cellStyles?.[rowIndex]?.[colIndex];
+            // Resolve styles with fallbacks
+            const textColor = cellStyles?.textColor || defaultTextColor;
+            // Header center aligns by default unless overridden, Body uses global default
+            const textAlign = cellStyles?.textAlign || (isHeader ? 'center' : defaultAlign);
+            const fontSize = cellStyles?.textSize || defaultFontSize;
+            const fontFamily = cellStyles?.fontFamily || defaultFontFamily;
+
+            // Flags
+            const isBold = cellStyles?.isBold ?? (isHeader || item.isBold);
+            const isItalic = cellStyles?.isItalic ?? item.isItalic;
+            const isUnderline = cellStyles?.isUnderline ?? item.isUnderline;
+            const isStrike = cellStyles?.isStrike ?? item.isStrike;
+            const isSub = cellStyles?.isSubscript;
+            const isSuper = cellStyles?.isSuperscript;
+
+            const cellKey = `${rowIndex}-${colIndex}`;
+
+            return (
+              <td
+                key={cellKey}
+                className={cn(
+                  "relative p-0 align-top transition-colors duration-200"
+                )}
+                style={{
+                  width: colWidths[colIndex],
+                  backgroundColor: cellStyles?.backgroundColor || 'transparent',
+                  borderRight: colIndex < row.length - 1 ? `1px solid ${borderColor}` : 'none',
+                }}
+              >
+                <div
+                  ref={(el) => {
+                    inputRefs.current[cellKey] = el;
+                    // Initialize content only once when element is first mounted
+                    if (el && !initializedCells.current.has(cellKey)) {
+                      el.innerHTML = cellContent;
+                      initializedCells.current.add(cellKey);
+                    }
+                  }}
+                  contentEditable
+                  suppressContentEditableWarning
+                  className={cn(
+                    "w-full h-full min-h-[32px] p-2 outline-none resize-none overflow-hidden bg-transparent whitespace-pre-wrap break-words",
+                    "selection:bg-primary/20",
+                  )}
+                  style={{
+                    color: textColor,
+                    textAlign: textAlign,
+                    fontSize: isSub || isSuper ? '0.75em' : `${fontSize}px`,
+                    fontFamily: fontFamily,
+                    fontWeight: isBold ? 700 : 400,
+                    fontStyle: isItalic ? 'italic' : 'normal',
+                    textDecoration: (isUnderline || isStrike) ? `${isUnderline ? 'underline ' : ''}${isStrike ? 'line-through' : ''}`.trim() : 'none',
+                    verticalAlign: isSub ? 'sub' : isSuper ? 'super' : 'baseline',
+                    lineHeight: isSub || isSuper ? '1' : 1.5
+                  }}
+                  onInput={(e) => handleInput(e, rowIndex, colIndex)}
+                  onKeyDown={(e) => handleKeyDown(e, rowIndex, colIndex)}
+                  onFocus={() => handleFocus(rowIndex, colIndex)}
+                  onBlur={handleBlur}
+                  onMouseDown={handleMouseDown}
+                  onMouseUp={handleMouseUp}
+                  onPaste={handlePaste}
+                  onSelect={onSelect}
+                  onKeyUp={onSelect}
+                />
+              </td>
+            )
+          })}
+        </tr>
+      ))}
+    </tbody>
+  );
+});
+TableGrid.displayName = 'TableGrid';
+
 export function CanvasTable({ item, isSelected, scale = 1, onSelect, onUpdate, onDelete, onHistorySave }: CanvasTableProps) {
   const [isDragging, setIsDragging] = useState(false);
   const [isResizing, setIsResizing] = useState(false);
@@ -91,11 +242,25 @@ export function CanvasTable({ item, isSelected, scale = 1, onSelect, onUpdate, o
   const [isMenuOpen, setIsMenuOpen] = useState(false);
   const [activeColorPicker, setActiveColorPicker] = useState<'accent' | 'bg' | 'text' | null>(null);
   const [colorScope, setColorScope] = useState<'cell' | 'table'>('table');
-  const [textTab, setTextTab] = useState<'font' | 'size' | 'align' | 'color' | null>(null);
+  const [textTab, setTextTab] = useState<'font' | 'align' | 'color' | 'style' | 'list-bullet' | 'list-number' | null>(null);
+  const [activeFormats, setActiveFormats] = useState({
+    bold: false,
+    italic: false,
+    underline: false,
+    strike: false,
+    subscript: false,
+    superscript: false,
+  });
   const [tableScale, setTableScale] = useState(1);
-  const inputRefs = useRef<{ [key: string]: HTMLTextAreaElement | null }>({});
+  const inputRefs = useRef<{ [key: string]: HTMLElement | null }>({});
+  const savedSelectionRef = useRef<Range | null>(null);
   const dragControls = useDragControls();
   const prevItemRef = useRef<TableType>(item);
+  
+  // Cell-level undo/redo history
+  const cellHistoryRef = useRef<{ [key: string]: { html: string; caret: number }[] }>({});
+  const cellHistoryIndexRef = useRef<{ [key: string]: number }>({});
+  const isUndoingRef = useRef(false);
 
   const currentStyleKey = (item.tableStyle || 'default') as TableStyleKey;
   const accentColor = item.headerColor || TABLE_STYLES[currentStyleKey]?.baseColor || '#374151';
@@ -108,11 +273,257 @@ export function CanvasTable({ item, isSelected, scale = 1, onSelect, onUpdate, o
   const [panelOffset, setPanelOffset] = useState({ x: 0, y: 0 });
   const dragStartRef = useRef({ mouseX: 0, mouseY: 0, itemX: 0, itemY: 0 });
 
+  // Fallback for colWidths
+  const colWidths = item.colWidths || Array(item.cols).fill(`${100 / item.cols}%`);
+
+  // Helper to save current selection
+  const saveSelection = () => {
+    const sel = window.getSelection();
+    if (sel && sel.rangeCount > 0) {
+      savedSelectionRef.current = sel.getRangeAt(0).cloneRange();
+    }
+  };
+
+  // Helper to restore saved selection
+  const restoreSelection = () => {
+    if (savedSelectionRef.current) {
+      const sel = window.getSelection();
+      if (sel) {
+        sel.removeAllRanges();
+        sel.addRange(savedSelectionRef.current);
+      }
+    }
+  };
+
+  // Helper to select all content in the focused cell
+  const selectCellContent = () => {
+    if (!focusedCell) return false;
+    const cellEl = inputRefs.current[`${focusedCell.row}-${focusedCell.col}`];
+    if (!cellEl) return false;
+
+    cellEl.focus();
+    const sel = window.getSelection();
+    if (!sel) return false;
+
+    const range = document.createRange();
+    range.selectNodeContents(cellEl);
+    sel.removeAllRanges();
+    sel.addRange(range);
+    return true;
+  };
+
+  // Helper: Get Caret Position (Text Offset)
+  const getCaretIndex = (element: HTMLElement) => {
+    let position = 0;
+    const selection = window.getSelection();
+    if (selection && selection.rangeCount !== 0) {
+      const range = selection.getRangeAt(0);
+      const preCaretRange = range.cloneRange();
+      preCaretRange.selectNodeContents(element);
+      preCaretRange.setEnd(range.endContainer, range.endOffset);
+      position = preCaretRange.toString().length;
+    }
+    return position;
+  };
+
+  // Helper: Set Caret Position
+  const setCaretIndex = (element: HTMLElement, index: number) => {
+    const range = document.createRange();
+    const sel = window.getSelection();
+    let currentPos = 0;
+    let nodeStack: Node[] = [element];
+    let node: Node | undefined;
+    let found = false;
+
+    while (nodeStack.length > 0 && !found) {
+      node = nodeStack.pop();
+      if (!node) continue;
+
+      if (node.nodeType === 3) { // Text Node
+        const textLen = node.textContent?.length || 0;
+        if (currentPos + textLen >= index) {
+          range.setStart(node, index - currentPos);
+          range.collapse(true);
+          found = true;
+        } else {
+          currentPos += textLen;
+        }
+      } else {
+        let i = node.childNodes.length;
+        while (i--) {
+          nodeStack.push(node.childNodes[i]);
+        }
+      }
+    }
+    if (found && sel) {
+      sel.removeAllRanges();
+      sel.addRange(range);
+    }
+  };
+
+  // Initialize cell history when focusing a cell
+  const initCellHistory = (cellKey: string, html: string) => {
+    if (!cellHistoryRef.current[cellKey]) {
+      cellHistoryRef.current[cellKey] = [{ html, caret: 0 }];
+      cellHistoryIndexRef.current[cellKey] = 0;
+    }
+  };
+
+  // Push to cell history
+  const pushCellHistory = (cellKey: string, html: string, caret: number) => {
+    if (isUndoingRef.current) return;
+    
+    const history = cellHistoryRef.current[cellKey] || [];
+    const index = cellHistoryIndexRef.current[cellKey] ?? 0;
+    
+    // Truncate history if we're not at the end
+    const newHistory = history.slice(0, index + 1);
+    newHistory.push({ html, caret });
+    
+    // Keep history limited
+    if (newHistory.length > 100) newHistory.shift();
+    
+    cellHistoryRef.current[cellKey] = newHistory;
+    cellHistoryIndexRef.current[cellKey] = newHistory.length - 1;
+  };
+
+  // Custom detection for subscript - check if selection is inside <sub> tag
+  const isSelectionInSubscript = (): boolean => {
+    const sel = window.getSelection();
+    if (!sel || sel.rangeCount === 0) return false;
+    
+    // Check if there's an actual selection (not just cursor)
+    // If collapsed (just cursor), check parent - but be more strict
+    if (sel.isCollapsed) {
+      // For collapsed selection, only return true if cursor is in middle of sub content
+      let node: Node | null = sel.anchorNode;
+      while (node) {
+        if (node.nodeName === 'SUB') {
+          const subEl = node as HTMLElement;
+          const range = sel.getRangeAt(0);
+          // Only highlight if cursor is NOT at the very end of the sub element
+          const textLen = subEl.textContent?.length || 0;
+          if (range.startOffset < textLen) return true;
+          return false;
+        }
+        node = node.parentNode;
+      }
+      return false;
+    }
+    
+    // For actual selection, check if anchor is in sub
+    let node: Node | null = sel.anchorNode;
+    while (node) {
+      if (node.nodeName === 'SUB') return true;
+      node = node.parentNode;
+    }
+    return false;
+  };
+
+  // Custom detection for superscript - check if selection is inside <sup> tag
+  const isSelectionInSuperscript = (): boolean => {
+    const sel = window.getSelection();
+    if (!sel || sel.rangeCount === 0) return false;
+    
+    // Check if there's an actual selection (not just cursor)
+    if (sel.isCollapsed) {
+      let node: Node | null = sel.anchorNode;
+      while (node) {
+        if (node.nodeName === 'SUP') {
+          const supEl = node as HTMLElement;
+          const range = sel.getRangeAt(0);
+          const textLen = supEl.textContent?.length || 0;
+          if (range.startOffset < textLen) return true;
+          return false;
+        }
+        node = node.parentNode;
+      }
+      return false;
+    }
+    
+    let node: Node | null = sel.anchorNode;
+    while (node) {
+      if (node.nodeName === 'SUP') return true;
+      node = node.parentNode;
+    }
+    return false;
+  };
+
+  // Helper to get accurate format state using both queryCommandState and DOM traversal
+  const getAccurateFormatState = () => ({
+    bold: document.queryCommandState('bold'),
+    italic: document.queryCommandState('italic'),
+    underline: document.queryCommandState('underline'),
+    strike: document.queryCommandState('strikeThrough'),
+    subscript: document.queryCommandState('subscript') || isSelectionInSubscript(),
+    superscript: document.queryCommandState('superscript') || isSelectionInSuperscript(),
+  });
+
+  // Helper to find the parent sub/sup element
+  const findFormattingParent = (tagName: 'SUB' | 'SUP'): HTMLElement | null => {
+    const sel = window.getSelection();
+    if (!sel || sel.rangeCount === 0) return null;
+    let node: Node | null = sel.anchorNode;
+    while (node) {
+      if (node.nodeName === tagName) return node as HTMLElement;
+      node = node.parentNode;
+    }
+    return null;
+  };
+
+  // Helper to unwrap (remove) a formatting tag while keeping the content
+  const unwrapTag = (tagName: 'SUB' | 'SUP'): boolean => {
+    const element = findFormattingParent(tagName);
+    if (!element || !element.parentNode) return false;
+    
+    // Replace the element with its contents
+    const parent = element.parentNode;
+    while (element.firstChild) {
+      parent.insertBefore(element.firstChild, element);
+    }
+    parent.removeChild(element);
+    return true;
+  };
+
   const handleStyleUpdate = (updates: Partial<TableType>) => {
     if (onHistorySave) {
       onHistorySave(item, { ...item, ...updates });
     }
     onUpdate(updates);
+  };
+
+  const formatList = (symbol: string, type: 'bullet' | 'number', formatId?: string) => {
+    if (!focusedCell) return;
+    const { row, col } = focusedCell;
+    const currentText = item.cells[row]?.[col] || '';
+
+    const lines = currentText.split('\n');
+    const newLines = lines.map((line, i) => {
+      const match = line.match(LIST_PREFIX_REGEX);
+      if (match) {
+        if (type === 'bullet') return line.replace(LIST_PREFIX_REGEX, `${symbol} `);
+        if (type === 'number' && formatId) {
+          const fmt = NUMBER_FORMATS.find(f => f.id === formatId);
+          if (fmt) return line.replace(LIST_PREFIX_REGEX, `${fmt.format(i + 1)} `);
+        }
+        return line;
+      } else {
+        if (type === 'bullet') return `${symbol} ${line}`;
+        if (type === 'number' && formatId) {
+          const fmt = NUMBER_FORMATS.find(f => f.id === formatId);
+          if (fmt) return `${fmt.format(i + 1)} ${line}`;
+        }
+        return line;
+      }
+    });
+
+    // Use updateCell logic pattern
+    const newCells = item.cells.map((r, i) => i === row ? r.map((c, j) => j === col ? newLines.join('\n') : c) : r);
+    const newItem = { ...item, cells: newCells };
+    if (onHistorySave) {
+      onHistorySave(item, newItem);
+    }
+    onUpdate({ cells: newCells });
   };
 
   const [isResetConfirming, setIsResetConfirming] = useState(false);
@@ -269,6 +680,111 @@ export function CanvasTable({ item, isSelected, scale = 1, onSelect, onUpdate, o
   };
 
   const handleKeyDown = (e: React.KeyboardEvent, rowIndex: number, colIndex: number) => {
+    // Escape cursor from sub/sup tags when typing at the end
+    if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) {
+      const sel = window.getSelection();
+      if (sel && sel.isCollapsed && sel.rangeCount > 0) {
+        const range = sel.getRangeAt(0);
+        const anchorNode = sel.anchorNode;
+        
+        // Check if we're inside a SUB or SUP
+        let formattingNode: HTMLElement | null = null;
+        let node: Node | null = anchorNode;
+        while (node) {
+          if (node.nodeName === 'SUB' || node.nodeName === 'SUP') {
+            formattingNode = node as HTMLElement;
+            break;
+          }
+          node = node.parentNode;
+        }
+        
+        if (formattingNode && anchorNode) {
+          // Check if cursor is at the very end of the text inside formatting element
+          // This handles both text nodes and when cursor is at end of any child
+          const isTextNode = anchorNode.nodeType === Node.TEXT_NODE;
+          const textLength = anchorNode.textContent?.length || 0;
+          const isAtTextEnd = isTextNode && range.startOffset >= textLength;
+          const isLastChild = anchorNode === formattingNode.lastChild || 
+                              (anchorNode.parentNode === formattingNode && !anchorNode.nextSibling);
+          const isAtEnd = isAtTextEnd && isLastChild;
+          
+          if (isAtEnd) {
+            e.preventDefault();
+            
+            // Insert the character after the formatting tag
+            const parent = formattingNode.parentNode;
+            if (parent) {
+              // Create a text node with the typed character
+              const textNode = document.createTextNode(e.key);
+              if (formattingNode.nextSibling) {
+                parent.insertBefore(textNode, formattingNode.nextSibling);
+              } else {
+                parent.appendChild(textNode);
+              }
+              // Move selection to after the new text node
+              const newRange = document.createRange();
+              newRange.setStart(textNode, 1);
+              newRange.collapse(true);
+              sel.removeAllRanges();
+              sel.addRange(newRange);
+              
+              // Trigger input event to update state
+              const inputEvent = new InputEvent('input', { bubbles: true, data: e.key });
+              (e.target as HTMLElement)?.dispatchEvent(inputEvent);
+            }
+          }
+        }
+      }
+    }
+    
+    // Handle Ctrl+Z (Undo) and Ctrl+Y/Ctrl+Shift+Z (Redo)
+    const isCtrl = e.ctrlKey || e.metaKey;
+    const key = e.key.toLowerCase();
+    
+    if (isCtrl && (key === 'z' || key === 'y')) {
+      e.preventDefault();
+      e.stopPropagation();
+      
+      const cellKey = `${rowIndex}-${colIndex}`;
+      const cellEl = inputRefs.current[cellKey];
+      if (!cellEl) return;
+      
+      const isRedo = e.shiftKey || key === 'y';
+      const history = cellHistoryRef.current[cellKey] || [];
+      let index = cellHistoryIndexRef.current[cellKey] ?? 0;
+      
+      if (isRedo) { // REDO
+        if (index < history.length - 1) {
+          index++;
+          cellHistoryIndexRef.current[cellKey] = index;
+          const state = history[index];
+          if (state) {
+            isUndoingRef.current = true;
+            cellEl.innerHTML = state.html;
+            setCaretIndex(cellEl, state.caret);
+            isUndoingRef.current = false;
+            // Update cell data
+            updateCell(rowIndex, colIndex, state.html);
+          }
+        }
+      } else { // UNDO
+        if (index > 0) {
+          index--;
+          cellHistoryIndexRef.current[cellKey] = index;
+          const state = history[index];
+          if (state) {
+            isUndoingRef.current = true;
+            cellEl.innerHTML = state.html;
+            setCaretIndex(cellEl, state.caret);
+            isUndoingRef.current = false;
+            // Update cell data
+            updateCell(rowIndex, colIndex, state.html);
+          }
+        }
+      }
+      return;
+    }
+    
     if (e.key === 'Enter' && e.ctrlKey) {
       e.preventDefault();
       if (rowIndex === item.rows - 1) {
@@ -347,7 +863,7 @@ export function CanvasTable({ item, isSelected, scale = 1, onSelect, onUpdate, o
       initial={{ scale: 0.95, opacity: 0 }}
       animate={{ scale: tableScale, opacity: 1 }}
       transition={{ duration: 0.15 }}
-      style={{ left: item.x, top: item.y, transformOrigin: 'top left', width: 'max-content' }}
+      style={{ left: item.x, top: item.y, transformOrigin: 'top left', width: item.width }}
       onClick={onSelect}
       onMouseEnter={() => setIsHovered(true)}
       onMouseLeave={() => setIsHovered(false)}
@@ -380,6 +896,7 @@ export function CanvasTable({ item, isSelected, scale = 1, onSelect, onUpdate, o
                 variant="ghost"
                 size="icon"
                 className={cn("h-6 w-6 rounded text-muted-foreground hover:text-foreground hover:bg-muted", isMenuOpen && "bg-muted text-foreground")}
+                onMouseDown={() => saveSelection()}
               >
                 <MoreHorizontal className="h-4 w-4" />
               </Button>
@@ -414,8 +931,10 @@ export function CanvasTable({ item, isSelected, scale = 1, onSelect, onUpdate, o
                   <span className="text-xs font-semibold text-muted-foreground">
                     {textTab ? (
                       textTab === 'font' ? 'Typography' :
-                        textTab === 'size' ? 'Font Size' :
-                          textTab === 'align' ? 'Text Alignment' : 'Text Color'
+                        textTab === 'align' ? 'Alignment' :
+                          textTab === 'style' ? 'Formatting' :
+                            textTab === 'list-bullet' ? 'Bullet Library' :
+                              textTab === 'list-number' ? 'Numbering' : 'Text Color'
                     ) : (
                       activeColorPicker ? (
                         activeColorPicker === 'accent' ? 'Accent Color' :
@@ -428,10 +947,12 @@ export function CanvasTable({ item, isSelected, scale = 1, onSelect, onUpdate, o
                     {(activeColorPicker || textTab) && (
                       <Button
                         variant="ghost"
-                        size="icon"
-                        className="h-5 w-5 rounded-full"
+                        size="sm"
+                        className="h-6 px-2 text-xs gap-1"
                         onClick={() => {
-                          if (textTab) {
+                          if (textTab === 'list-bullet' || textTab === 'list-number') {
+                            setTextTab('style');
+                          } else if (textTab) {
                             setTextTab(null);
                           } else {
                             setActiveColorPicker(null);
@@ -439,7 +960,7 @@ export function CanvasTable({ item, isSelected, scale = 1, onSelect, onUpdate, o
                         }}
                         title="Back"
                       >
-                        <ChevronLeft className="h-3 w-3" />
+                        <ChevronLeft className="h-3 w-3" /> Back
                       </Button>
                     )}
                     <Button
@@ -454,7 +975,7 @@ export function CanvasTable({ item, isSelected, scale = 1, onSelect, onUpdate, o
                 </div>
 
                 <div className="p-2">
-                  {activeColorPicker ? (
+                  {(activeColorPicker || textTab) && (
                     <>
                       {activeColorPicker === 'bg' && (
                         <Button
@@ -470,7 +991,6 @@ export function CanvasTable({ item, isSelected, scale = 1, onSelect, onUpdate, o
                         </Button>
                       )}
 
-                      {/* Global Scope Switcher & Grid */}
                       {/* Global Scope Switcher & Grid (Level 1) */}
                       {activeColorPicker === 'text' && !textTab && (
                         <>
@@ -499,11 +1019,14 @@ export function CanvasTable({ item, isSelected, scale = 1, onSelect, onUpdate, o
                             <Button variant="outline" size="sm" className="h-12 justify-start px-4 hover:bg-muted hover:text-primary transition-colors flex flex-col items-center justify-center gap-1" onClick={() => setTextTab('color')} title="Color">
                               <Palette className="h-5 w-5" /> <span className="text-[10px] font-medium">Color</span>
                             </Button>
+                            <Button variant="outline" size="sm" className="h-12 justify-start px-4 hover:bg-muted hover:text-primary transition-colors flex flex-col items-center justify-center gap-1" onMouseDown={(e) => { e.preventDefault(); saveSelection(); setTextTab('style'); }} title="Style">
+                              <Bold className="h-5 w-5" /> <span className="text-[10px] font-medium">Style</span>
+                            </Button>
                             <Button
                               variant={isResetConfirming ? "destructive" : "outline"}
                               size="sm"
                               className={cn(
-                                "h-12 justify-start px-4 transition-all flex flex-col items-center justify-center gap-1",
+                                "h-12 justify-start px-4 transition-all flex flex-col items-center justify-center gap-1 col-span-2",
                                 !isResetConfirming && "hover:bg-destructive/10 hover:text-destructive hover:border-destructive"
                               )}
                               onClick={() => {
@@ -533,9 +1056,192 @@ export function CanvasTable({ item, isSelected, scale = 1, onSelect, onUpdate, o
                       {/* Tool Content (Level 2) - Hidden if no tab selected */}
                       {textTab && (
                         <div className="animate-in slide-in-from-right-4 fade-in duration-200">
+
+                          {textTab === 'style' && (() => {
+                            return (
+                              <div className="flex flex-col gap-2 p-1">
+                                {/* Basic Formatting */}
+                                <div className="flex items-center justify-between bg-muted rounded p-1">
+                                  <div className="flex gap-1 w-full justify-between">
+                                    <Button
+                                      size="sm"
+                                      variant={activeFormats.bold ? "secondary" : "outline"}
+                                      className={cn("h-8 w-8 p-0", activeFormats.bold && "bg-primary/10 text-primary border-primary/20")}
+                                      onMouseDown={(e) => {
+                                        e.preventDefault();
+                                        document.execCommand('bold', false, undefined);
+                                        setActiveFormats(prev => ({ ...prev, bold: document.queryCommandState('bold') }));
+                                      }}
+                                      title="Bold"
+                                    >
+                                      <Bold className="h-3.5 w-3.5" />
+                                    </Button>
+                                    <Button
+                                      size="sm"
+                                      variant={activeFormats.italic ? "secondary" : "outline"}
+                                      className={cn("h-8 w-8 p-0", activeFormats.italic && "bg-primary/10 text-primary border-primary/20")}
+                                      onMouseDown={(e) => {
+                                        e.preventDefault();
+                                        document.execCommand('italic', false, undefined);
+                                        setActiveFormats(prev => ({ ...prev, italic: document.queryCommandState('italic') }));
+                                      }}
+                                      title="Italic"
+                                    >
+                                      <Italic className="h-3.5 w-3.5" />
+                                    </Button>
+                                    <Button
+                                      size="sm"
+                                      variant={activeFormats.underline ? "secondary" : "outline"}
+                                      className={cn("h-8 w-8 p-0", activeFormats.underline && "bg-primary/10 text-primary border-primary/20")}
+                                      onMouseDown={(e) => {
+                                        e.preventDefault();
+                                        document.execCommand('underline', false, undefined);
+                                        setActiveFormats(prev => ({ ...prev, underline: document.queryCommandState('underline') }));
+                                      }}
+                                      title="Underline"
+                                    >
+                                      <Underline className="h-3.5 w-3.5" />
+                                    </Button>
+                                    <Button
+                                      size="sm"
+                                      variant={activeFormats.strike ? "secondary" : "outline"}
+                                      className={cn("h-8 w-8 p-0", activeFormats.strike && "bg-primary/10 text-primary border-primary/20")}
+                                      onMouseDown={(e) => {
+                                        e.preventDefault();
+                                        document.execCommand('strikeThrough', false, undefined);
+                                        setActiveFormats(prev => ({ ...prev, strike: document.queryCommandState('strikeThrough') }));
+                                      }}
+                                      title="Strikethrough"
+                                    >
+                                      <Strikethrough className="h-3.5 w-3.5" />
+                                    </Button>
+                                    <Button
+                                      size="sm"
+                                      variant={activeFormats.subscript ? "secondary" : "outline"}
+                                      className={cn("h-8 w-8 p-0", activeFormats.subscript && "bg-primary/10 text-primary border-primary/20")}
+                                      onMouseDown={(e) => {
+                                        e.preventDefault();
+                                        const isCurrentlySubscript = document.queryCommandState('subscript') || isSelectionInSubscript();
+                                        const isCurrentlySuperscript = document.queryCommandState('superscript') || isSelectionInSuperscript();
+                                        
+                                        if (isCurrentlySubscript) {
+                                          // Toggle OFF - unwrap the sub tag
+                                          unwrapTag('SUB');
+                                        } else {
+                                          // Toggle ON - first turn off superscript if needed
+                                          if (isCurrentlySuperscript) {
+                                            unwrapTag('SUP');
+                                          }
+                                          document.execCommand('subscript', false, undefined);
+                                        }
+                                        setActiveFormats(getAccurateFormatState());
+                                      }}
+                                      title="Subscript"
+                                    >
+                                      <Subscript className="h-3.5 w-3.5" />
+                                    </Button>
+                                    <Button
+                                      size="sm"
+                                      variant={activeFormats.superscript ? "secondary" : "outline"}
+                                      className={cn("h-8 w-8 p-0", activeFormats.superscript && "bg-primary/10 text-primary border-primary/20")}
+                                      onMouseDown={(e) => {
+                                        e.preventDefault();
+                                        const isCurrentlySubscript = document.queryCommandState('subscript') || isSelectionInSubscript();
+                                        const isCurrentlySuperscript = document.queryCommandState('superscript') || isSelectionInSuperscript();
+                                        
+                                        if (isCurrentlySuperscript) {
+                                          // Toggle OFF - unwrap the sup tag
+                                          unwrapTag('SUP');
+                                        } else {
+                                          // Toggle ON - first turn off subscript if needed
+                                          if (isCurrentlySubscript) {
+                                            unwrapTag('SUB');
+                                          }
+                                          document.execCommand('superscript', false, undefined);
+                                        }
+                                        setActiveFormats(getAccurateFormatState());
+                                      }}
+                                      title="Superscript"
+                                    >
+                                      <Superscript className="h-3.5 w-3.5" />
+                                    </Button>
+                                  </div>
+                                </div>
+
+                                <div className="grid grid-cols-2 gap-2 mt-1">
+                                  <Button variant="outline" size="sm" className="h-8 text-xs justify-center" onClick={() => setTextTab('list-bullet')} title="Bullet List">
+                                    <List className="h-3.5 w-3.5 mr-2" /> Bullet
+                                  </Button>
+                                  <Button variant="outline" size="sm" className="h-8 text-xs justify-center" onClick={() => setTextTab('list-number')} title="Numbered List">
+                                    <ListOrdered className="h-3.5 w-3.5 mr-2" /> Number
+                                  </Button>
+                                </div>
+                              </div>
+                            );
+                          })()}
+
+                          {textTab === 'list-bullet' && (() => {
+                            const { row, col } = focusedCell || { row: 0, col: 0 };
+                            const currentText = item.cells[row]?.[col] || '';
+                            const match = currentText.match(LIST_PREFIX_REGEX);
+                            const currentPrefix = match ? match[0].trim() : '';
+
+                            return (
+                              <div className="p-1">
+                                <div className="grid grid-cols-5 gap-1">
+                                  {BULLET_ARCHETYPES.map((char) => (
+                                    <Button
+                                      key={char}
+                                      variant={currentPrefix === char ? "secondary" : "outline"}
+                                      size="sm"
+                                      className={cn("h-9 w-9 p-0 text-lg", currentPrefix === char && "bg-primary/10 text-primary border-primary/20")}
+                                      onClick={() => formatList(char, 'bullet')}
+                                    >
+                                      {char}
+                                    </Button>
+                                  ))}
+                                </div>
+                              </div>
+                            );
+                          })()}
+
+                          {textTab === 'list-number' && (() => {
+                            const { row, col } = focusedCell || { row: 0, col: 0 };
+                            const currentText = item.cells[row]?.[col] || '';
+                            const match = currentText.match(LIST_PREFIX_REGEX);
+                            const currentPrefix = match ? match[0].trim() : '';
+
+                            const detectFormat = (p: string) => {
+                              if (/^\d+\.$/.test(p)) return 'decimal';
+                              if (/^[IVX]+\.$/.test(p)) return 'roman-upper';
+                              if (/^[ivx]+\.$/.test(p)) return 'roman-lower';
+                              if (/^[A-Z]\.$/.test(p)) return 'alpha-upper';
+                              if (/^[a-z]\.$/.test(p)) return 'alpha-lower';
+                              if (/^\d+\)$/.test(p)) return 'decimal-paren-right';
+                              if (/^\(\d+\)$/.test(p)) return 'decimal-paren-both';
+                              return null;
+                            };
+                            const activeFormatId = detectFormat(currentPrefix);
+
+                            return (
+                              <div className="flex flex-col gap-1 p-1 max-h-48 overflow-y-auto custom-scrollbar">
+                                {NUMBER_FORMATS.map((fmt) => (
+                                  <Button
+                                    key={fmt.id}
+                                    variant={activeFormatId === fmt.id ? "secondary" : "outline"}
+                                    className={cn("w-full justify-start gap-3 h-10", activeFormatId === fmt.id && "bg-primary/10 text-primary border-primary/20")}
+                                    onClick={() => formatList('', 'number', fmt.id)}
+                                  >
+                                    <span className={cn("w-16 text-right font-mono text-xs", activeFormatId === fmt.id ? "font-bold text-primary" : "text-muted-foreground")}>{fmt.label}</span>
+                                    <span className="text-sm">List Item</span>
+                                  </Button>
+                                ))}
+                              </div>
+                            );
+                          })()}
+
                           {textTab === 'font' && (
                             <div className="flex flex-col gap-2">
-                              {/* Size Controls (Merged) */}
                               <div className="flex items-center gap-1 bg-muted rounded p-1">
                                 <Button variant="ghost" size="sm" className="h-7 w-7 rounded-sm hover:bg-background shadow-none" onClick={() => {
                                   const step = 2;
@@ -585,85 +1291,44 @@ export function CanvasTable({ item, isSelected, scale = 1, onSelect, onUpdate, o
                                   }
                                 }}><Plus className="h-3.5 w-3.5" /></Button>
                               </div>
-
-                              {/* Font List & Search */}
                               <div className="flex flex-col gap-1">
                                 <div className="p-1">
                                   <div className="flex items-center gap-1 bg-muted/30 rounded border p-1 focus-within:border-primary/50 focus-within:ring-1 ring-primary/20 transition-all">
                                     <Search className="h-3.5 w-3.5 text-muted-foreground ml-1" />
                                     <input
                                       className="flex-1 min-w-0 h-6 text-xs bg-transparent border-none focus:outline-none placeholder:text-muted-foreground/50 px-1"
-                                      placeholder="Search or add font..."
+                                      placeholder="Search..."
                                       value={fontSearch}
                                       onChange={(e) => setFontSearch(e.target.value)}
                                     />
-                                    <div className="h-4 w-[1px] bg-border mx-0.5" />
-                                    <Button
-                                      variant="ghost"
-                                      size="icon"
-                                      className="h-6 w-6 text-muted-foreground hover:text-primary hover:bg-background/50"
-                                      onClick={() => fileInputRef.current?.click()}
-                                      title="Import Font File (.ttf, .otf)"
-                                    >
-                                      <Upload className="h-3.5 w-3.5" />
-                                    </Button>
                                   </div>
-                                  <input
-                                    type="file"
-                                    accept=".ttf,.otf,.woff,.woff2"
-                                    className="hidden"
-                                    ref={fileInputRef}
-                                    onChange={handleFileUpload}
-                                  />
                                 </div>
-
                                 <div className="grid grid-cols-1 gap-0.5 max-h-48 overflow-y-auto custom-scrollbar pr-1">
-                                  {filteredFonts.length > 0 ? (
-                                    filteredFonts.map((font) => (
-                                      <button
-                                        key={font.value}
-                                        className={cn(
-                                          "w-full text-left px-3 py-2 text-xs rounded transition-colors flex items-center justify-between",
-                                          ((colorScope === 'cell' && focusedCell && (item.cellStyles?.[`${focusedCell.row}-${focusedCell.col}`]?.fontFamily === font.value)) || (!focusedCell && item.fontFamily === font.value))
-                                            ? "bg-primary/10 text-primary font-medium"
-                                            : "hover:bg-muted text-muted-foreground"
-                                        )}
-                                        style={{ fontFamily: font.value }}
-                                        onClick={() => {
-                                          if (colorScope === 'cell' && focusedCell) {
-                                            const key = `${focusedCell.row}-${focusedCell.col}`;
-                                            const newStyles = { ...item.cellStyles, [key]: { ...item.cellStyles?.[key], fontFamily: font.value } };
-                                            handleStyleUpdate({ cellStyles: newStyles });
-                                          } else {
-                                            const cleanCells = item.cellStyles ? Object.fromEntries(Object.entries(item.cellStyles).map(([k, v]) => { const { fontFamily, ...rest } = v; return [k, rest]; })) : {};
-                                            handleStyleUpdate({ fontFamily: font.value, cellStyles: cleanCells });
-                                          }
-                                        }}
-                                      >
-                                        {font.name}
-                                        {((colorScope === 'cell' && focusedCell && (item.cellStyles?.[`${focusedCell.row}-${focusedCell.col}`]?.fontFamily === font.value)) || (!focusedCell && item.fontFamily === font.value)) && <div className="w-1.5 h-1.5 rounded-full bg-primary" />}
-                                      </button>
-                                    ))
-                                  ) : (
+                                  {filteredFonts.map((font) => (
                                     <button
-                                      className="w-full text-left px-3 py-2 text-xs rounded hover:bg-muted text-muted-foreground flex items-center gap-2 italic"
+                                      key={font.value}
+                                      className={cn(
+                                        "w-full text-left px-3 py-2 text-xs rounded transition-colors flex items-center justify-between",
+                                        ((colorScope === 'cell' && focusedCell && (item.cellStyles?.[`${focusedCell.row}-${focusedCell.col}`]?.fontFamily === font.value)) || (!focusedCell && item.fontFamily === font.value))
+                                          ? "bg-primary/10 text-primary font-medium"
+                                          : "hover:bg-muted text-muted-foreground"
+                                      )}
+                                      style={{ fontFamily: font.value }}
                                       onClick={() => {
-                                        const val = fontSearch.trim();
-                                        if (val) {
-                                          if (colorScope === 'cell' && focusedCell) {
-                                            const key = `${focusedCell.row}-${focusedCell.col}`;
-                                            const newStyles = { ...item.cellStyles, [key]: { ...item.cellStyles?.[key], fontFamily: val } };
-                                            handleStyleUpdate({ cellStyles: newStyles });
-                                          } else {
-                                            const cleanCells = item.cellStyles ? Object.fromEntries(Object.entries(item.cellStyles).map(([k, v]) => { const { fontFamily, ...rest } = v; return [k, rest]; })) : {};
-                                            handleStyleUpdate({ fontFamily: val, cellStyles: cleanCells });
-                                          }
+                                        if (colorScope === 'cell' && focusedCell) {
+                                          const key = `${focusedCell.row}-${focusedCell.col}`;
+                                          const newStyles = { ...item.cellStyles, [key]: { ...item.cellStyles?.[key], fontFamily: font.value } };
+                                          handleStyleUpdate({ cellStyles: newStyles });
+                                        } else {
+                                          const cleanCells = item.cellStyles ? Object.fromEntries(Object.entries(item.cellStyles).map(([k, v]) => { const { fontFamily, ...rest } = v; return [k, rest]; })) : {};
+                                          handleStyleUpdate({ fontFamily: font.value, cellStyles: cleanCells });
                                         }
                                       }}
                                     >
-                                      <Plus className="h-3 w-3" /> Use "{fontSearch}"
+                                      {font.name}
+                                      {((colorScope === 'cell' && focusedCell && (item.cellStyles?.[`${focusedCell.row}-${focusedCell.col}`]?.fontFamily === font.value)) || (!focusedCell && item.fontFamily === font.value)) && <div className="w-1.5 h-1.5 rounded-full bg-primary" />}
                                     </button>
-                                  )}
+                                  ))}
                                 </div>
                               </div>
                             </div>
@@ -685,8 +1350,7 @@ export function CanvasTable({ item, isSelected, scale = 1, onSelect, onUpdate, o
                                       const newStyles = { ...item.cellStyles, [key]: { ...item.cellStyles?.[key], textAlign: 'left' as const } };
                                       handleStyleUpdate({ cellStyles: newStyles });
                                     } else {
-                                      const cleanCells = item.cellStyles ? Object.fromEntries(Object.entries(item.cellStyles).map(([k, v]) => { const { textAlign, ...rest } = v; return [k, rest]; })) : {};
-                                      handleStyleUpdate({ textAlign: 'left', cellStyles: cleanCells });
+                                      handleStyleUpdate({ textAlign: 'left' });
                                     }
                                   }}
                                 >
@@ -701,8 +1365,7 @@ export function CanvasTable({ item, isSelected, scale = 1, onSelect, onUpdate, o
                                       const newStyles = { ...item.cellStyles, [key]: { ...item.cellStyles?.[key], textAlign: 'center' as const } };
                                       handleStyleUpdate({ cellStyles: newStyles });
                                     } else {
-                                      const cleanCells = item.cellStyles ? Object.fromEntries(Object.entries(item.cellStyles).map(([k, v]) => { const { textAlign, ...rest } = v; return [k, rest]; })) : {};
-                                      handleStyleUpdate({ textAlign: 'center', cellStyles: cleanCells });
+                                      handleStyleUpdate({ textAlign: 'center' });
                                     }
                                   }}
                                 >
@@ -717,8 +1380,7 @@ export function CanvasTable({ item, isSelected, scale = 1, onSelect, onUpdate, o
                                       const newStyles = { ...item.cellStyles, [key]: { ...item.cellStyles?.[key], textAlign: 'right' as const } };
                                       handleStyleUpdate({ cellStyles: newStyles });
                                     } else {
-                                      const cleanCells = item.cellStyles ? Object.fromEntries(Object.entries(item.cellStyles).map(([k, v]) => { const { textAlign, ...rest } = v; return [k, rest]; })) : {};
-                                      handleStyleUpdate({ textAlign: 'right', cellStyles: cleanCells });
+                                      handleStyleUpdate({ textAlign: 'right' });
                                     }
                                   }}
                                 >
@@ -746,7 +1408,6 @@ export function CanvasTable({ item, isSelected, scale = 1, onSelect, onUpdate, o
                         </div>
                       )}
 
-                      {/* Default Color Panel for Accent/Bg Only */}
                       {activeColorPicker !== 'text' && (
                         <ColorPanel
                           color={tempColor}
@@ -767,8 +1428,9 @@ export function CanvasTable({ item, isSelected, scale = 1, onSelect, onUpdate, o
                         />
                       )}
                     </>
-                  ) : (
-                    // Main Menu Content
+                  )}
+
+                  {(!activeColorPicker && !textTab) && (
                     <>
                       <div className="mb-2">
                         <p className="text-[10px] font-medium text-muted-foreground uppercase tracking-wider px-2 mb-1">Style Preset</p>
@@ -802,12 +1464,11 @@ export function CanvasTable({ item, isSelected, scale = 1, onSelect, onUpdate, o
                             <div className="w-4 h-4 rounded-full border shadow-sm" style={{ backgroundColor: bgColor }} />
                           )}
                         </button>
-                        <button className="w-full flex items-center gap-2 px-2 py-1.5 rounded text-sm hover:bg-muted transition-colors" onClick={() => { setActiveColorPicker('text'); setColorScope(focusedCell ? 'cell' : 'table'); setTempColor(textColor); }}>
+                        <button className="w-full flex items-center gap-2 px-2 py-1.5 rounded text-sm hover:bg-muted transition-colors" onMouseDown={(e) => { e.preventDefault(); saveSelection(); setActiveColorPicker('text'); setColorScope(focusedCell ? 'cell' : 'table'); setTempColor(textColor); }}>
                           <div className="p-1 rounded bg-orange-500/10 text-orange-500"><Type className="h-3.5 w-3.5" /></div>
                           <span className="flex-1 text-left">Text Style</span>
                           <div className="w-4 h-4 rounded-full border shadow-sm" style={{ backgroundColor: textColor }} />
                         </button>
-
 
                         <button className="w-full flex items-center gap-2 px-2 py-1.5 rounded text-sm hover:bg-muted transition-colors cursor-pointer" onClick={() => onUpdate({ hideBorder: !item.hideBorder })}>
                           <div className="p-1 rounded bg-indigo-500/10 text-indigo-500"><Grid className="h-3.5 w-3.5" /></div>
@@ -884,97 +1545,70 @@ export function CanvasTable({ item, isSelected, scale = 1, onSelect, onUpdate, o
           border: `2px solid ${isSelected ? '#0EA5E9' : displayBorderColor}`,
         }}
       >
-        <table style={{ borderCollapse: 'collapse', tableLayout: 'auto' }}>
-          <tbody>
-            {item.cells.map((row, rowIndex) => (
-              <tr key={rowIndex}>
-                {row.map((cell, colIndex) => {
-                  const cellKey = `${rowIndex}-${colIndex}`;
-                  const isHeader = rowIndex === 0;
-                  const cellColor = item.cellStyles?.[cellKey]?.textColor || textColor;
-                  // Header ignores global alignment (unless cell-specific override), Body uses global or default left
-                  const cellAlign = item.cellStyles?.[cellKey]?.textAlign || (isHeader ? 'center' : (item.textAlign || 'left'));
-                  const cellFontSize = item.cellStyles?.[cellKey]?.textSize || item.textSize || 14;
-                  const cellFont = item.cellStyles?.[cellKey]?.fontFamily || item.fontFamily || 'Inter';
-                  const isFocused = focusedCell?.row === rowIndex && focusedCell?.col === colIndex;
-
-                  // Corner Logic
-                  const isTopLeft = rowIndex === 0 && colIndex === 0;
-                  const isTopRight = rowIndex === 0 && colIndex === row.length - 1;
-                  const isBottomLeft = rowIndex === item.cells.length - 1 && colIndex === 0;
-                  const isBottomRight = rowIndex === item.cells.length - 1 && colIndex === row.length - 1;
-                  const r = '8px'; // Matching rounded-lg roughly (inner radius)
-
-                  return (
-                    <td
-                      key={colIndex}
-                      onClick={() => inputRefs.current[cellKey]?.focus()}
-                      style={{
-                        verticalAlign: 'top',
-                        cursor: 'text',
-                        // Base Borders (Always render to maintain layout)
-                        borderRight: colIndex < row.length - 1 ? `2px solid ${displayBorderColor}` : undefined,
-                        borderBottom: rowIndex < item.cells.length - 1 ? `2px solid ${displayBorderColor}` : undefined,
-
-                        // Focused Overrides
-                        ...(isFocused ? {
-                          boxShadow: '0 0 0 2px #0EA5E9', // Overlay on top of everything
-                          position: 'relative',
-                          zIndex: 20, // Ensure high z-index to cover neighbors
-                          borderTopLeftRadius: isTopLeft && !showControls ? r : undefined,
-                          borderTopRightRadius: isTopRight && !showControls ? r : undefined,
-                          borderBottomLeftRadius: isBottomLeft ? r : undefined,
-                          borderBottomRightRadius: isBottomRight ? r : undefined,
-                        } : {})
-                      }}
-                      className={cn("transition-colors")}
-                    >
-                      <textarea
-                        ref={(el) => { inputRefs.current[cellKey] = el; }}
-                        value={cell}
-                        onChange={(e) => updateCell(rowIndex, colIndex, e.target.value)}
-                        onFocus={() => {
-                          prevItemRef.current = JSON.parse(JSON.stringify(item));
-                          setFocusedCell({ row: rowIndex, col: colIndex });
-                          onSelect(); // Ensure table is selected
-                        }}
-
-                        onBlur={() => {
-                          if (JSON.stringify(prevItemRef.current) !== JSON.stringify(item)) {
-                            onHistorySave?.(prevItemRef.current, item);
-                          }
-                        }}
-                        onKeyDown={(e) => handleKeyDown(e, rowIndex, colIndex)}
-                        onMouseDown={(e) => e.stopPropagation()}
-                        rows={Math.max(1, cell.split('\n').length)}
-                        className="cell-input px-3 py-2 text-sm bg-transparent outline-none resize-none font-mono"
-                        style={{
-                          color: cellColor,
-                          fontWeight: isHeader ? 600 : 400,
-                          width: '100%',
-                          minWidth: isHeader ? '8ch' : `${Math.max(8, Math.max(...cell.split('\n').map(line => line.length)) + 3)}ch`,
-                          whiteSpace: 'pre',
-                          overflow: 'hidden',
-                          textAlign: cellAlign as any,
-                          fontSize: `${cellFontSize}px`,
-                          lineHeight: 1.5,
-                          fontFamily: cellFont,
-                        }}
-                        placeholder={isHeader ? 'Header' : ''}
-                      />
-                    </td>
-                  );
-                })}
-              </tr>
-            ))}
-          </tbody>
+        <table className="w-full border-collapse table-fixed">
+          <TableGrid
+            item={item}
+            colWidths={colWidths}
+            focusedCell={focusedCell}
+            inputRefs={inputRefs}
+            handleInput={(e, r, c) => {
+              const cellKey = `${r}-${c}`;
+              const cellEl = e.currentTarget;
+              const html = cellEl.innerHTML;
+              const caret = getCaretIndex(cellEl);
+              pushCellHistory(cellKey, html, caret);
+              updateCell(r, c, html);
+            }}
+            handleKeyDown={handleKeyDown}
+            handleFocus={(r, c) => {
+              const cellKey = `${r}-${c}`;
+              const cellEl = inputRefs.current[cellKey];
+              if (cellEl) {
+                initCellHistory(cellKey, cellEl.innerHTML);
+              }
+              prevItemRef.current = JSON.parse(JSON.stringify(item));
+              setFocusedCell({ row: r, col: c });
+              onSelect();
+              setTimeout(() => {
+                setActiveFormats(getAccurateFormatState());
+              }, 0);
+            }}
+            handleBlur={() => {
+              if (JSON.stringify(prevItemRef.current) !== JSON.stringify(item)) {
+                onHistorySave?.(prevItemRef.current, item);
+              }
+              setFocusedCell(null);
+            }}
+            handleMouseDown={() => {
+              document.addEventListener('selectionchange', onSelect, { once: true });
+            }}
+            handleMouseUp={() => {
+              onSelect();
+              setActiveFormats(getAccurateFormatState());
+            }}
+            handlePaste={(e) => {
+              e.preventDefault();
+              const text = e.clipboardData.getData('text/plain');
+              document.execCommand('insertText', false, text);
+            }}
+            onSelect={() => {
+              setActiveFormats(getAccurateFormatState());
+            }}
+            // Style Defaults
+            defaultTextColor={item.textColor || '#e5e5e5'}
+            defaultAlign={item.textAlign || 'left'}
+            defaultFontSize={item.textSize || 14}
+            defaultFontFamily={item.fontFamily || 'Inter'}
+            showControls={showControls}
+            borderColor={borderColor}
+          />
         </table>
 
         {/* Resize Handle - Corner triangle shape */}
         <div
           className={cn(
-            'resize-handle absolute -bottom-1 -right-1 w-0 h-0 cursor-nwse-resize transition-opacity duration-150',
-            showControls ? 'opacity-100' : 'opacity-0 pointer-events-none'
+            "resize-handle absolute -bottom-1 -right-1 w-0 h-0 cursor-nwse-resize transition-opacity duration-150",
+            showControls ? "opacity-100" : "opacity-0 pointer-events-none"
           )}
           style={{
             borderLeft: '12px solid transparent',

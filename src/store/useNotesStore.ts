@@ -67,8 +67,28 @@ export interface CanvasTable {
   textAlign?: 'left' | 'center' | 'right';
   textSize?: number;
   fontFamily?: string;
-  cellStyles?: { [key: string]: { textColor?: string; textAlign?: 'left' | 'center' | 'right'; textSize?: number; fontFamily?: string } };
+  isBold?: boolean;
+  isItalic?: boolean;
+  isUnderline?: boolean;
+  isStrike?: boolean;
+  isSubscript?: boolean;
+  isSuperscript?: boolean;
+  cellStyles?: {
+    [key: string]: {
+      textColor?: string;
+      textAlign?: 'left' | 'center' | 'right';
+      textSize?: number;
+      fontFamily?: string;
+      isBold?: boolean;
+      isItalic?: boolean;
+      isUnderline?: boolean;
+      isStrike?: boolean;
+      isSubscript?: boolean;
+      isSuperscript?: boolean;
+    }
+  };
   hideBorder?: boolean;
+  colWidths?: (number | string)[];
 }
 
 export interface CanvasTodoList {
